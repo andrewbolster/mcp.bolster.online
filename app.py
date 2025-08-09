@@ -10,7 +10,7 @@ from fastmcp import FastMCP
 import requests
 from datetime import datetime, timedelta
 import re
-from typing import List, Dict, Optional
+from typing import Optional
 
 # Initialize the MCP server
 mcp = FastMCP(
@@ -226,14 +226,8 @@ def send_contact_message(message: str, sender: str) -> str:
     # Placeholder implementation - will be replaced with actual email integration
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Log the message (in real implementation, this would send an email)
-    contact_log = f"""
-    Contact Message Received at {timestamp}
-    From: {sender}
-    Message: {message}
-    
-    Status: Queued for email delivery (placeholder implementation)
-    """
+    # In a real implementation, this would log the message to a file or database
+    # contact_log = f"Contact from {sender} at {timestamp}: {message}"
     
     # In a real implementation, you would integrate with email service here
     # For now, just return a confirmation

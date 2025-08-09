@@ -6,7 +6,6 @@ Tests both resources and tools using FastMCP in-memory testing patterns.
 """
 
 import pytest
-import json
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
 from fastmcp import Client
