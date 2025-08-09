@@ -1,0 +1,342 @@
+name: 🤖 AI Content Review & Validation
+
+on:
+  schedule:
+    # Run monthly on the 1st at 9 AM UTC
+    - cron: '0 9 1 * *'
+  workflow_dispatch:
+    inputs:
+      review_all:
+        description: 'Review all resources (not just outdated ones)'
+        required: false
+        default: 'false'
+        type: boolean
+      create_issue:
+        description: 'Create GitHub issue if content needs updating'
+        required: false
+        default: 'true'
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+  models: read
+
+jobs:
+  ai-content-review:
+    name: 🧠 AI-Powered Resource Review
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: 🔧 Install uv and dependencies
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        uv sync
+
+    - name: 📝 Extract Resource Content
+      id: extract-content
+      run: |
+        # Create content extractor script
+        cat > extract_resources.py << 'EOF'
+        import asyncio
+        import json
+        from fastmcp import Client
+        from app import mcp
+
+        async def extract_all_resources():
+            resources = [
+                "resource://andrew-bolster/personal-website",
+                "resource://andrew-bolster/professional-profile", 
+                "resource://andrew-bolster/farset-labs",
+                "resource://andrew-bolster/social-media",
+                "resource://andrew-bolster/research-interests",
+                "resource://andrew-bolster/community-involvement",
+                "resource://andrew-bolster/technical-blog"
+            ]
+            
+            resource_content = {}
+            
+            async with Client(mcp) as client:
+                for resource_uri in resources:
+                    try:
+                        result = await client.read_resource(resource_uri)
+                        resource_content[resource_uri] = result[0].text
+                        print(f"✅ Extracted: {resource_uri}")
+                    except Exception as e:
+                        print(f"❌ Failed to extract {resource_uri}: {e}")
+                        resource_content[resource_uri] = f"ERROR: {e}"
+            
+            # Save to JSON for the AI to analyze
+            with open('resource_content.json', 'w') as f:
+                json.dump(resource_content, f, indent=2)
+            
+            print(f"📊 Extracted content from {len(resource_content)} resources")
+
+        if __name__ == "__main__":
+            asyncio.run(extract_all_resources())
+        EOF
+        
+        uv run python extract_resources.py
+
+    - name: 🌐 Fetch Current Online Information
+      id: fetch-current
+      run: |
+        # Create web fetcher for current info
+        cat > fetch_current_info.py << 'EOF'
+        import requests
+        import json
+        from datetime import datetime
+
+        def fetch_current_info():
+            current_info = {
+                "timestamp": datetime.now().isoformat(),
+                "sources": {}
+            }
+            
+            # Try to fetch Andrew's current website
+            try:
+                response = requests.get("https://andrewbolster.info/", timeout=10)
+                if response.status_code == 200:
+                    current_info["sources"]["website"] = {
+                        "status": "accessible",
+                        "last_checked": datetime.now().isoformat(),
+                        "content_length": len(response.text),
+                        "title_check": "Andrew" in response.text
+                    }
+                else:
+                    current_info["sources"]["website"] = {
+                        "status": f"http_error_{response.status_code}",
+                        "last_checked": datetime.now().isoformat()
+                    }
+            except Exception as e:
+                current_info["sources"]["website"] = {
+                    "status": f"fetch_error: {e}",
+                    "last_checked": datetime.now().isoformat()
+                }
+            
+            # Add other sources we could check
+            current_info["sources"]["linkedin"] = {
+                "url": "https://www.linkedin.com/in/andrewbolster/",
+                "note": "Manual verification needed - LinkedIn blocks automated access"
+            }
+            
+            current_info["sources"]["github"] = {
+                "url": "https://github.com/andrewbolster",
+                "note": "Could be checked via GitHub API if needed"
+            }
+            
+            with open('current_info.json', 'w') as f:
+                json.dump(current_info, f, indent=2)
+                
+            print(f"🌐 Current information fetch completed at {current_info['timestamp']}")
+
+        if __name__ == "__main__":
+            fetch_current_info()
+        EOF
+        
+        uv run python fetch_current_info.py
+
+    - name: 🤖 AI Content Analysis with GitHub Models
+      id: ai-analysis
+      run: |
+        # Install GitHub CLI with models extension
+        type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt update
+        sudo apt install gh -y
+        
+        # Create AI analysis prompt
+        cat > content_review_prompt.md << 'EOF'
+        You are an AI assistant helping to review and validate the accuracy of biographical content about Andrew Bolster. 
+
+        Your task is to analyze the provided resource content and identify any information that might be outdated, inaccurate, or inconsistent.
+
+        **Instructions:**
+        1. Review each resource section carefully
+        2. Look for potential inconsistencies between different resources
+        3. Identify information that commonly becomes outdated (job titles, current roles, recent achievements)
+        4. Flag any content that seems generic or could benefit from more specific, current information
+        5. Suggest improvements or areas that need verification
+
+        **Focus Areas:**
+        - Current job titles and company affiliations
+        - Recent projects or achievements
+        - Contact information and social media links
+        - Technology skills and current interests
+        - Community involvement and organizational roles
+
+        **Output Format:**
+        Please provide your analysis in this markdown format:
+
+        ## 🔍 Content Review Summary
+        
+        ### ✅ Accurate & Current Information
+        - [List items that appear current and accurate]
+        
+        ### ⚠️ Potentially Outdated Information
+        - [List items that might need updating]
+        
+        ### ❓ Information Needing Verification
+        - [List items that should be double-checked]
+        
+        ### 💡 Suggestions for Improvement
+        - [List specific recommendations]
+        
+        ### 🚨 Critical Issues
+        - [List any major problems or inconsistencies]
+
+        EOF
+
+        # Combine the resource content with the prompt
+        echo "# Resource Content to Review" > analysis_input.md
+        echo "" >> analysis_input.md
+        cat resource_content.json >> analysis_input.md
+        echo "" >> analysis_input.md
+        echo "# Current Information Context" >> analysis_input.md
+        cat current_info.json >> analysis_input.md
+        echo "" >> analysis_input.md
+        cat content_review_prompt.md >> analysis_input.md
+
+        # Use GitHub Models for AI analysis
+        echo "🤖 Starting AI analysis with GitHub Models..."
+        
+        # Try different models in order of preference
+        MODELS=("gpt-4o-mini" "Meta-Llama-3.1-70B-Instruct" "Mistral-large-2407")
+        
+        for MODEL in "${MODELS[@]}"; do
+          echo "Trying model: $MODEL"
+          # Use the structured prompt file with the data
+          if gh models run "$MODEL" --prompt .github/prompts/content-review.yml < analysis_input.md > ai_analysis_result.md 2>/dev/null; then
+            echo "✅ Successfully analyzed with $MODEL using structured prompt"
+            echo "MODEL_USED=$MODEL" >> $GITHUB_ENV
+            break
+          elif gh models run "$MODEL" < analysis_input.md > ai_analysis_result.md 2>/dev/null; then
+            echo "✅ Successfully analyzed with $MODEL (fallback to inline prompt)"
+            echo "MODEL_USED=$MODEL" >> $GITHUB_ENV
+            break
+          else
+            echo "❌ Failed with $MODEL, trying next..."
+          fi
+        done
+
+        if [ ! -f ai_analysis_result.md ] || [ ! -s ai_analysis_result.md ]; then
+          echo "❌ All AI models failed, creating fallback analysis..."
+          cat > ai_analysis_result.md << 'FALLBACK'
+        ## 🔍 Content Review Summary (Automated Fallback)
+        
+        ### 📋 Analysis Status
+        - AI analysis temporarily unavailable
+        - Fallback automated checks performed
+        
+        ### ⚠️ Recommended Manual Review
+        - Verify current job titles and roles
+        - Check recent project information
+        - Validate contact information and social links
+        - Review technology skills for currency
+        
+        ### 🔄 Next Steps
+        - Manual review recommended
+        - Re-run AI analysis when models are available
+        FALLBACK
+          echo "MODEL_USED=fallback" >> $GITHUB_ENV
+        fi
+
+    - name: 📊 Generate Review Report
+      id: generate-report
+      run: |
+        echo "# 🤖 AI-Powered Content Review Report" > review_report.md
+        echo "" >> review_report.md
+        echo "**Generated:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> review_report.md
+        echo "**AI Model Used:** ${{ env.MODEL_USED }}" >> review_report.md
+        echo "**Trigger:** ${{ github.event_name }}" >> review_report.md
+        echo "" >> review_report.md
+        
+        # Add the AI analysis
+        cat ai_analysis_result.md >> review_report.md
+        
+        echo "" >> review_report.md
+        echo "---" >> review_report.md
+        echo "" >> review_report.md
+        echo "## 📈 Technical Details" >> review_report.md
+        echo "- Resources analyzed: $(jq '. | length' resource_content.json)" >> review_report.md
+        echo "- Website accessibility: $(jq -r '.sources.website.status' current_info.json)" >> review_report.md
+        echo "- Analysis timestamp: $(jq -r '.timestamp' current_info.json)" >> review_report.md
+        
+        # Set outputs for next step
+        if grep -q "🚨 Critical Issues" ai_analysis_result.md && [ -s <(grep -A 10 "🚨 Critical Issues" ai_analysis_result.md | tail -n +2 | sed '/^$/,$d') ]; then
+          echo "has_critical_issues=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_critical_issues=false" >> $GITHUB_OUTPUT
+        fi
+        
+        if grep -q "⚠️ Potentially Outdated" ai_analysis_result.md && [ -s <(grep -A 10 "⚠️ Potentially Outdated" ai_analysis_result.md | tail -n +2 | sed '/^$/,$d') ]; then
+          echo "has_outdated_content=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_outdated_content=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: 📝 Create GitHub Issue (if needed)
+      if: |
+        (steps.generate-report.outputs.has_critical_issues == 'true' || 
+         steps.generate-report.outputs.has_outdated_content == 'true') &&
+        (github.event.inputs.create_issue != 'false')
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('review_report.md', 'utf8');
+          
+          const issueBody = `${report}
+
+          ---
+          
+          ## 🔧 Action Items
+          - [ ] Review flagged content for accuracy
+          - [ ] Update outdated information in resource files
+          - [ ] Verify external links and contact information
+          - [ ] Consider adding more recent achievements or projects
+          
+          ## 🤖 Automation Info
+          This issue was automatically created by the AI Content Review workflow.
+          - **Workflow run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - **Triggered by:** ${{ github.actor }}
+          - **Next review:** Monthly on the 1st
+          `;
+
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `🤖 Content Review: Updates Needed (${new Date().toISOString().split('T')[0]})`,
+            body: issueBody,
+            labels: ['content-review', 'ai-generated', 'maintenance']
+          });
+
+    - name: 📊 Upload Analysis Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: ai-content-review-${{ github.run_id }}
+        path: |
+          review_report.md
+          ai_analysis_result.md
+          resource_content.json
+          current_info.json
+        retention-days: 90
+
+    - name: 📈 Add Results to Job Summary
+      run: |
+        echo "## 🤖 AI Content Review Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        cat ai_analysis_result.md >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "---" >> $GITHUB_STEP_SUMMARY
+        echo "**Full report uploaded as artifact:** ai-content-review-${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY

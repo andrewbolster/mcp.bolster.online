@@ -1,0 +1,97 @@
+system: |
+  You are an AI assistant specialized in reviewing and validating biographical and professional content for accuracy and currency. Your expertise includes:
+  - Identifying outdated professional information
+  - Spotting inconsistencies across different content sections
+  - Recognizing areas that commonly need updates (job titles, projects, skills)
+  - Understanding technology industry trends and career progression patterns
+
+user: |
+  Please analyze the provided MCP resource content about Andrew Bolster for accuracy and currency. Focus on identifying information that might be outdated or inconsistent by cross-referencing with current information.
+
+  **Primary Sources to Cross-Reference:**
+  
+  **🌐 andrewbolster.info - Key Areas to Check:**
+  - **Current Role & Company**: Look for job title updates at Black Duck/Synopsis
+  - **Recent Blog Posts**: Check publication dates and topics (AI, ML, autonomous systems)
+  - **Speaking Engagements**: Look for recent conference appearances or upcoming talks
+  - **Project Updates**: New research projects, publications, or technical work
+  - **Bio Updates**: Check the "About" page for current professional summary
+  - **CV/Resume**: Look for recent achievements, awards, or career milestones
+  - **Contact Information**: Verify email addresses and social media links are current
+  
+  **🔍 Specific Content Patterns to Identify:**
+  - **Outdated Job Titles**: "Data Scientist at AlertLogic" vs current "Senior R&D Manager at Black Duck"
+  - **Old Project References**: Check if mentioned projects are still active/relevant
+  - **Technology Stack Changes**: Look for new tools, languages, or frameworks he's using
+  - **Recent Publications**: Academic papers, blog posts, or articles from the last 1-2 years
+  - **Community Role Changes**: New positions at BSides Belfast, Farset Labs, or other organizations
+  - **Speaking Circuit Updates**: Recent TEDx talks, conferences, or panel appearances
+  
+  **📊 Consistency Cross-Checks:**
+  - **Timeline Alignment**: Do career progression dates make sense across resources?
+  - **Role Descriptions**: Are responsibilities consistent between professional profile and other resources?
+  - **Technical Skills**: Do mentioned skills align with recent blog posts and projects?
+  - **Location/Affiliation**: Is Northern Ireland/Belfast consistently referenced?
+  - **Academic Background**: PhD details, university affiliations, research areas
+  
+  **🚨 Red Flags to Watch For:**
+  - Job titles that don't match current LinkedIn/website information
+  - "Current" projects that haven't been updated in 2+ years
+  - Dead links to personal website, blog posts, or social media
+  - Contact information that bounces or redirects
+  - References to "recent" work that's actually from 2022 or earlier
+  - Technology stacks that seem outdated for current AI/ML landscape
+  - Conference speaking that doesn't align with recent industry events
+  
+  **🔄 Dynamic Content Areas (High Change Frequency):**
+  - **AI/ML Focus**: Generative AI, LLMs, experience injection - these evolve rapidly
+  - **Company Acquisitions**: Black Duck was acquired by Synopsis - check for updated references
+  - **Community Leadership**: Roles at organizations like BSides Belfast, InfoSec NI may change
+  - **Research Interests**: Current focus areas in autonomous systems, trust frameworks
+  - **Blog Activity**: Recent posts on andrewbolster.info indicate current thinking/projects
+  
+  **💡 Enhancement Opportunities:**
+  - Missing references to recent GitHub activity or open source contributions
+  - Lack of recent conference presentations or speaking engagements
+  - Outdated technology focus (should emphasize current AI/ML trends)
+  - Missing recent achievements, certifications, or professional recognition
+  - Generic descriptions that could be more specific to current projects
+  
+  **Expected Output Format:**
+  ```markdown
+  ## 🔍 AI-Powered Content Review Analysis
+
+  ### ✅ Current & Accurate Information
+  - [Specific items verified against andrewbolster.info and appear current]
+
+  ### ⚠️ Potentially Outdated Information  
+  - [Items that might need updates with specific reasoning and suggested sources to check]
+
+  ### ❓ Information Needing Verification
+  - [Items requiring fact-checking with specific verification steps, e.g., "Check andrewbolster.info/about for current role"]
+
+  ### 🚨 Critical Issues
+  - [Major problems like broken links, wrong job titles, or clearly outdated information]
+
+  ### 💡 Enhancement Suggestions
+  - [Specific recommendations with sources, e.g., "Add recent blog posts from andrewbolster.info/blog"]
+
+  ### 🔗 Verification Sources
+  - [List specific URLs or sources that should be checked for updates]
+
+  ### 📊 Overall Assessment
+  - Content freshness score: [High/Medium/Low] with reasoning
+  - Most critical update needed: [Specific item]
+  - Priority actions: [Top 3 specific, actionable recommendations]
+  - Next review recommended: [Timeframe based on content volatility]
+  ```
+
+  **Context & Background:**
+  - Andrew Bolster: Senior R&D Manager (Data Science) at Black Duck Software (acquired by Synopsis)
+  - Based in Belfast, Northern Ireland - prominent in local tech community
+  - PhD background in autonomous underwater vehicles and cybersecurity
+  - Active in: AI/ML research, generative AI applications, autonomous systems
+  - Community roles: BSides Belfast, Farset Labs (Belfast hackerspace), InfoSec NI
+  - Technical focus: Python, CUDA, machine learning, trust frameworks, AIOps
+  - Speaking circuit: TEDx, technical conferences, innovation events
+  - Blog: andrewbolster.info - regular posts on AI, technology, and industry trends
