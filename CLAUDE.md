@@ -14,10 +14,11 @@ This is a fully-featured MCP (Model Context Protocol) server providing curated r
 ├── pyproject.toml                  # Modern Python project configuration with uv
 ├── main.py                         # Alternative server entry point
 ├── README.md                       # Comprehensive project documentation
+├── .pre-commit-config.yaml         # Pre-commit hooks for code quality
 ├── .github/
 │   ├── workflows/
-│   │   ├── test-and-coverage.yml  # Multi-platform testing with ARM64 & Windows 2025
-│   │   ├── code-quality.yml       # Linting, formatting, security scans
+│   │   ├── test-and-coverage.yml  # Multi-platform testing (Ubuntu x64/ARM64)
+│   │   ├── code-quality.yml       # Ruff linting/formatting, mypy, complexity analysis
 │   │   ├── ai-content-review.yml  # AI-powered content validation using GitHub Models
 │   │   └── fun-experiments.yml    # Experimental features & weekly stats
 │   └── prompts/
@@ -27,7 +28,7 @@ This is a fully-featured MCP (Model Context Protocol) server providing curated r
 
 ## Key Features
 
-### MCP Server Resources (app.py)
+### MCP Server Resources (app.py) - 7 Available
 - `resource://andrew-bolster/personal-website` - Main website information
 - `resource://andrew-bolster/professional-profile` - Current roles and background
 - `resource://andrew-bolster/farset-labs` - Belfast hackerspace information
@@ -36,7 +37,7 @@ This is a fully-featured MCP (Model Context Protocol) server providing curated r
 - `resource://andrew-bolster/community-involvement` - Organizational roles
 - `resource://andrew-bolster/technical-blog` - Blog information and topics
 
-### MCP Server Tools (app.py)
+### MCP Server Tools (app.py) - 2 Available
 - `send_contact_message(message, sender)` - Contact tool with email integration placeholder
 - `check_availability(start_date, days_ahead)` - Calendar availability via iCal feed parsing
 
@@ -46,6 +47,9 @@ This is a fully-featured MCP (Model Context Protocol) server providing curated r
 ```bash
 # Install dependencies (uses modern uv package manager)
 uv sync
+
+# Install pre-commit hooks for automatic code quality
+uv run pre-commit install
 
 # Run the MCP server
 uv run python app.py
@@ -60,6 +64,15 @@ uv run pytest test_app.py --cov=app --cov-report=term-missing
 # Generate HTML coverage report
 uv run pytest test_app.py --cov=app --cov-report=html
 
+# Code quality checks (same as CI)
+uv run ruff check .              # Linting
+uv run ruff format --check .     # Format checking
+uv run mypy app.py --ignore-missing-imports  # Type checking
+
+# Pre-commit hooks (runs automatically)
+uv run pre-commit install        # Setup
+uv run pre-commit run --all-files # Manual run
+
 # Current test coverage: 92%
 # Missing coverage: iCal parsing edge cases, network error handling
 ```
@@ -67,18 +80,20 @@ uv run pytest test_app.py --cov=app --cov-report=html
 ## GitHub Actions Automation
 
 ### 🧪 Test & Coverage Workflow
-- **Multi-platform testing**: Ubuntu, ARM64, Windows Server 2025 (preview)
+- **Multi-platform testing**: Ubuntu (latest, 22.04), ARM64 (24.04)
 - **Python versions**: 3.11, 3.12, 3.13
 - **Coverage reporting**: Codecov integration with PR comments
 - **Security scanning**: Bandit + Safety vulnerability checks
 - **Performance benchmarks**: pytest-benchmark integration
 - **Artifact preservation**: Test results and coverage reports
+- **Removed Windows**: Windows Server 2025 preview had dependency issues
 
 ### 🔍 Code Quality Workflow
-- **Modern tooling**: Ruff (linting), Black (formatting), isort (imports), mypy (typing)
-- **Automated fixes**: Auto-commits formatting to develop branch
-- **Code analysis**: Radon complexity analysis with reports
+- **Modern tooling**: Ruff (linting + formatting), mypy (type checking)
+- **Pre-commit integration**: Automatic quality checks on every commit
+- **Code analysis**: Radon complexity analysis with GitHub Actions summaries
 - **Dependency security**: Automated dependency review on PRs
+- **Performance**: Single tool (Ruff) replaces Black + isort + flake8 for speed
 
 ### 🤖 AI Content Review Workflow
 - **GitHub Models integration**: Uses latest AI models (GPT-4o-mini, Llama, Mistral)
@@ -125,19 +140,33 @@ uv run pytest test_app.py --cov=app --cov-report=html
 
 ## Important Files to Understand
 
-- **app.py**: Core MCP server with 6 resources + 2 tools, 92% test coverage
+- **app.py**: Core MCP server with 7 resources + 2 tools, 92% test coverage
 - **test_app.py**: Comprehensive test suite using FastMCP in-memory patterns
 - **.github/workflows/ai-content-review.yml**: Cutting-edge AI automation
 - **.github/prompts/content-review.yml**: Professional AI content analysis prompt
 - **pyproject.toml**: Modern Python project configuration with uv package manager
 
+## Technical Decisions Made
+
+### Code Quality Evolution
+- **Switched from Black + isort to Ruff**: Single tool for linting and formatting (faster, simpler)
+- **Pre-commit hooks**: Automatic code quality enforcement with comprehensive checks
+- **Modern type annotations**: Updated from `Dict`/`Optional` to `dict`/`|` syntax
+- **Ruff configuration**: Allows long lines in docstrings/strings for better readability
+
+### Platform Support
+- **Removed Windows Server 2025**: Preview OS had dependency installation issues
+- **Added ARM64 testing**: Testing on GitHub's new ARM64 runners
+- **Ubuntu focus**: Reliable cross-version compatibility (latest, 22.04, 24.04)
+
 ## Current Status: Production Ready
 
 This MCP server is fully functional with:
-- ✅ Comprehensive resource coverage about Andrew Bolster
-- ✅ Working contact and availability tools
+- ✅ Comprehensive resource coverage about Andrew Bolster (7 resources)
+- ✅ Working contact and availability tools (2 tools)
 - ✅ 92% test coverage with modern testing practices
-- ✅ Full CI/CD automation with latest GitHub features
-- ✅ AI-powered content maintenance
-- ✅ Professional deployment documentation
-- ✅ Extensive error handling and monitoring
+- ✅ Full CI/CD automation with cutting-edge GitHub features
+- ✅ AI-powered content maintenance and validation
+- ✅ Modern code quality tooling (Ruff + pre-commit)
+- ✅ Professional deployment documentation (nginx + webhooks)
+- ✅ Cross-platform compatibility and extensive error handling
