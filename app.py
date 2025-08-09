@@ -8,7 +8,7 @@ a Northern Ireland-based technology researcher, data scientist, and community bu
 
 import re
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import requests
 from fastmcp import FastMCP
@@ -279,7 +279,7 @@ def check_availability(start_date: Optional[str] = None, days_ahead: int = 7) ->
 
         # Parse events from iCal content (basic parsing)
         events = []
-        current_event = {}
+        current_event: Dict[str, Any] = {}
 
         for line in ical_content.split("\n"):
             line = line.strip()
@@ -333,6 +333,9 @@ def check_availability(start_date: Optional[str] = None, days_ahead: int = 7) ->
             if "start" in event and "end" in event:
                 event_start = event["start"]
                 event_end = event["end"]
+                # Type guard to ensure they are datetime objects
+                if not isinstance(event_start, datetime) or not isinstance(event_end, datetime):
+                    continue
 
                 # Check if event overlaps with our time range
                 if event_start <= end_dt and event_end >= start_dt:
