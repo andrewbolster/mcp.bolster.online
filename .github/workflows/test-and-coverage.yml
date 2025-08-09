@@ -1,0 +1,189 @@
+name: 🧪 Tests & Coverage
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  test:
+    name: 🐍 Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-22.04]
+        python-version: ["3.11", "3.12", "3.13"]
+        include:
+          # Test ARM64 runners (new GitHub feature!)
+          - os: ubuntu-24.04-arm64
+            python-version: "3.12"
+          # Test Windows Server 2025 (in preview!)
+          - os: windows-2025
+            python-version: "3.12"
+
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🐍 Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: 🔧 Install uv (modern Python package manager)
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: 📦 Install dependencies
+      run: |
+        uv sync
+
+    - name: 🧪 Run tests with coverage
+      run: |
+        uv run pytest test_app.py \
+          --verbose \
+          --cov=app \
+          --cov-report=xml \
+          --cov-report=html \
+          --cov-report=term-missing \
+          --junitxml=junit/test-results-${{ matrix.python-version }}.xml
+
+    - name: 📊 Upload coverage reports to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+    - name: 📈 Coverage comment on PR
+      if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+      uses: py-cov-action/python-coverage-comment-action@v3
+      with:
+        GITHUB_TOKEN: ${{ github.token }}
+        MINIMUM_COVERAGE: 90
+
+    - name: 📋 Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results-${{ matrix.os }}-${{ matrix.python-version }}
+        path: |
+          junit/test-results-${{ matrix.python-version }}.xml
+          htmlcov/
+        retention-days: 30
+
+  security-scan:
+    name: 🔒 Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: 🔧 Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: 📦 Install dependencies
+      run: uv sync
+
+    - name: 🛡️ Run Bandit security scan
+      run: |
+        uv add bandit[toml]
+        uv run bandit -r app.py -f json -o bandit-report.json || true
+
+    - name: 🔍 Run Safety check for vulnerabilities
+      run: |
+        uv add safety
+        uv run safety check --json --output safety-report.json || true
+
+    - name: 📋 Upload security scan results
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-scan-results
+        path: |
+          bandit-report.json
+          safety-report.json
+        retention-days: 30
+
+  performance-test:
+    name: ⚡ Performance Testing
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: 🔧 Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: 📦 Install dependencies
+      run: |
+        uv sync
+        uv add pytest-benchmark
+
+    - name: ⚡ Run performance benchmarks
+      run: |
+        # Create a simple benchmark test
+        cat > benchmark_test.py << 'EOF'
+        import pytest
+        import asyncio
+        from fastmcp import Client
+        from app import mcp
+
+        class TestPerformance:
+            @pytest.mark.asyncio
+            async def test_resource_access_performance(self, benchmark):
+                async def access_resource():
+                    async with Client(mcp) as client:
+                        return await client.read_resource("resource://andrew-bolster/personal-website")
+                
+                result = await benchmark(access_resource)
+                assert result is not None
+
+            @pytest.mark.asyncio 
+            async def test_contact_tool_performance(self, benchmark):
+                async def send_message():
+                    async with Client(mcp) as client:
+                        return await client.call_tool("send_contact_message", {
+                            "message": "Performance test message",
+                            "sender": "Benchmark Test"
+                        })
+                
+                result = await benchmark(send_message)
+                assert "Message received" in result.data
+        EOF
+
+        uv run pytest benchmark_test.py --benchmark-json=benchmark-results.json
+
+    - name: 📊 Upload benchmark results
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-benchmarks
+        path: benchmark-results.json
+        retention-days: 30

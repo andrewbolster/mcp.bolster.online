@@ -1,0 +1,125 @@
+name: 🔍 Code Quality
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  code-quality:
+    name: 🚀 Code Quality Checks
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: 🔧 Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: 📦 Install dependencies and dev tools
+      run: |
+        uv sync
+        uv add --group dev ruff black isort mypy
+
+    - name: ⚡ Run Ruff (super fast linter)
+      run: |
+        uv run ruff check . --output-format=github --target-version=py311
+
+    - name: 🎨 Check code formatting with Black
+      run: |
+        uv run black --check --diff .
+
+    - name: 📤 Check import sorting with isort
+      run: |
+        uv run isort --check-only --diff .
+
+    - name: 🔍 Type checking with mypy
+      run: |
+        uv run mypy app.py --ignore-missing-imports
+
+    - name: 📊 Code complexity analysis
+      run: |
+        uv add radon
+        echo "## Code Complexity Report" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        uv run radon cc . -a >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Maintainability Index" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        uv run radon mi . >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+    - name: 📏 Check line count and file stats
+      run: |
+        echo "## Project Statistics" >> $GITHUB_STEP_SUMMARY
+        echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Python files | $(find . -name '*.py' | wc -l) |" >> $GITHUB_STEP_SUMMARY
+        echo "| Total lines of code | $(find . -name '*.py' -exec wc -l {} + | tail -1 | awk '{print $1}') |" >> $GITHUB_STEP_SUMMARY
+        echo "| Test files | $(find . -name 'test_*.py' | wc -l) |" >> $GITHUB_STEP_SUMMARY
+
+  auto-format:
+    name: 🎨 Auto-format Code
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: 🔧 Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: 📦 Install formatters
+      run: |
+        uv sync
+        uv add --group dev black isort
+
+    - name: 🎨 Auto-format with Black
+      run: uv run black .
+
+    - name: 📤 Auto-sort imports with isort
+      run: uv run isort .
+
+    - name: 🔄 Commit changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add -A
+        git diff --staged --quiet || git commit -m "🎨 Auto-format code with Black and isort"
+        git push
+
+  dependency-review:
+    name: 📦 Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🔍 Dependency Review
+      uses: actions/dependency-review-action@v4
+      with:
+        fail-on-severity: moderate
