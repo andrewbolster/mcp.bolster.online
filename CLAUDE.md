@@ -29,7 +29,7 @@ This is a fully-featured MCP (Model Context Protocol) server providing curated r
 
 ### MCP Server Resources (app.py)
 - `resource://andrew-bolster/personal-website` - Main website information
-- `resource://andrew-bolster/professional-profile` - Current roles and background  
+- `resource://andrew-bolster/professional-profile` - Current roles and background
 - `resource://andrew-bolster/farset-labs` - Belfast hackerspace information
 - `resource://andrew-bolster/social-media` - Professional networking profiles
 - `resource://andrew-bolster/research-interests` - Academic and technical focus
@@ -57,7 +57,7 @@ uv run python app.py
 uv run pytest test_app.py -v
 uv run pytest test_app.py --cov=app --cov-report=term-missing
 
-# Generate HTML coverage report  
+# Generate HTML coverage report
 uv run pytest test_app.py --cov=app --cov-report=html
 
 # Current test coverage: 92%
@@ -74,7 +74,7 @@ uv run pytest test_app.py --cov=app --cov-report=html
 - **Performance benchmarks**: pytest-benchmark integration
 - **Artifact preservation**: Test results and coverage reports
 
-### 🔍 Code Quality Workflow  
+### 🔍 Code Quality Workflow
 - **Modern tooling**: Ruff (linting), Black (formatting), isort (imports), mypy (typing)
 - **Automated fixes**: Auto-commits formatting to develop branch
 - **Code analysis**: Radon complexity analysis with reports
@@ -83,7 +83,7 @@ uv run pytest test_app.py --cov=app --cov-report=html
 ### 🤖 AI Content Review Workflow
 - **GitHub Models integration**: Uses latest AI models (GPT-4o-mini, Llama, Mistral)
 - **Content validation**: Automatically reviews MCP resources for accuracy
-- **Web verification**: Checks andrewbolster.info for current information  
+- **Web verification**: Checks andrewbolster.info for current information
 - **Smart scheduling**: Monthly reviews with manual trigger options
 - **Issue automation**: Creates GitHub issues when content needs updating
 - **Structured prompts**: Professional AI guidance via .github/prompts/
@@ -103,7 +103,7 @@ uv run pytest test_app.py --cov=app --cov-report=html
 - **Resource Pattern**: Structured resource definitions with comprehensive content
 - **Tool Pattern**: Type-safe tool implementations with validation
 
-### Testing Strategy  
+### Testing Strategy
 - **In-memory testing**: Direct FastMCP Client-Server connection for speed
 - **Mock integration**: unittest.mock for external dependencies (iCal, requests)
 - **Coverage targets**: Aiming for 95%+ coverage with meaningful tests
@@ -119,14 +119,14 @@ uv run pytest test_app.py --cov=app --cov-report=html
 
 1. **Local Development**: Use `uv` for fast dependency management and testing
 2. **Quality Gates**: Ruff, Black, mypy run automatically on push
-3. **Testing**: Comprehensive test suite runs on multiple platforms  
+3. **Testing**: Comprehensive test suite runs on multiple platforms
 4. **AI Review**: Monthly content validation with actionable recommendations
 5. **Deployment**: nginx + webhook deployment documentation provided
 
 ## Important Files to Understand
 
 - **app.py**: Core MCP server with 6 resources + 2 tools, 92% test coverage
-- **test_app.py**: Comprehensive test suite using FastMCP in-memory patterns  
+- **test_app.py**: Comprehensive test suite using FastMCP in-memory patterns
 - **.github/workflows/ai-content-review.yml**: Cutting-edge AI automation
 - **.github/prompts/content-review.yml**: Professional AI content analysis prompt
 - **pyproject.toml**: Modern Python project configuration with uv package manager
@@ -136,7 +136,7 @@ uv run pytest test_app.py --cov=app --cov-report=html
 This MCP server is fully functional with:
 - ✅ Comprehensive resource coverage about Andrew Bolster
 - ✅ Working contact and availability tools
-- ✅ 92% test coverage with modern testing practices  
+- ✅ 92% test coverage with modern testing practices
 - ✅ Full CI/CD automation with latest GitHub features
 - ✅ AI-powered content maintenance
 - ✅ Professional deployment documentation

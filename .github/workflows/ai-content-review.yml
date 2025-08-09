@@ -55,16 +55,16 @@ jobs:
         async def extract_all_resources():
             resources = [
                 "resource://andrew-bolster/personal-website",
-                "resource://andrew-bolster/professional-profile", 
+                "resource://andrew-bolster/professional-profile",
                 "resource://andrew-bolster/farset-labs",
                 "resource://andrew-bolster/social-media",
                 "resource://andrew-bolster/research-interests",
                 "resource://andrew-bolster/community-involvement",
                 "resource://andrew-bolster/technical-blog"
             ]
-            
+
             resource_content = {}
-            
+
             async with Client(mcp) as client:
                 for resource_uri in resources:
                     try:
@@ -74,17 +74,17 @@ jobs:
                     except Exception as e:
                         print(f"❌ Failed to extract {resource_uri}: {e}")
                         resource_content[resource_uri] = f"ERROR: {e}"
-            
+
             # Save to JSON for the AI to analyze
             with open('resource_content.json', 'w') as f:
                 json.dump(resource_content, f, indent=2)
-            
+
             print(f"📊 Extracted content from {len(resource_content)} resources")
 
         if __name__ == "__main__":
             asyncio.run(extract_all_resources())
         EOF
-        
+
         uv run python extract_resources.py
 
     - name: 🌐 Fetch Current Online Information
@@ -101,7 +101,7 @@ jobs:
                 "timestamp": datetime.now().isoformat(),
                 "sources": {}
             }
-            
+
             # Try to fetch Andrew's current website
             try:
                 response = requests.get("https://andrewbolster.info/", timeout=10)
@@ -122,27 +122,27 @@ jobs:
                     "status": f"fetch_error: {e}",
                     "last_checked": datetime.now().isoformat()
                 }
-            
+
             # Add other sources we could check
             current_info["sources"]["linkedin"] = {
                 "url": "https://www.linkedin.com/in/andrewbolster/",
                 "note": "Manual verification needed - LinkedIn blocks automated access"
             }
-            
+
             current_info["sources"]["github"] = {
                 "url": "https://github.com/andrewbolster",
                 "note": "Could be checked via GitHub API if needed"
             }
-            
+
             with open('current_info.json', 'w') as f:
                 json.dump(current_info, f, indent=2)
-                
+
             print(f"🌐 Current information fetch completed at {current_info['timestamp']}")
 
         if __name__ == "__main__":
             fetch_current_info()
         EOF
-        
+
         uv run python fetch_current_info.py
 
     - name: 🤖 AI Content Analysis with GitHub Models
@@ -154,10 +154,10 @@ jobs:
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
         sudo apt update
         sudo apt install gh -y
-        
+
         # Create AI analysis prompt
         cat > content_review_prompt.md << 'EOF'
-        You are an AI assistant helping to review and validate the accuracy of biographical content about Andrew Bolster. 
+        You are an AI assistant helping to review and validate the accuracy of biographical content about Andrew Bolster.
 
         Your task is to analyze the provided resource content and identify any information that might be outdated, inaccurate, or inconsistent.
 
@@ -179,19 +179,19 @@ jobs:
         Please provide your analysis in this markdown format:
 
         ## 🔍 Content Review Summary
-        
+
         ### ✅ Accurate & Current Information
         - [List items that appear current and accurate]
-        
+
         ### ⚠️ Potentially Outdated Information
         - [List items that might need updating]
-        
+
         ### ❓ Information Needing Verification
         - [List items that should be double-checked]
-        
+
         ### 💡 Suggestions for Improvement
         - [List specific recommendations]
-        
+
         ### 🚨 Critical Issues
         - [List any major problems or inconsistencies]
 
@@ -209,10 +209,10 @@ jobs:
 
         # Use GitHub Models for AI analysis
         echo "🤖 Starting AI analysis with GitHub Models..."
-        
+
         # Try different models in order of preference
         MODELS=("gpt-4o-mini" "Meta-Llama-3.1-70B-Instruct" "Mistral-large-2407")
-        
+
         for MODEL in "${MODELS[@]}"; do
           echo "Trying model: $MODEL"
           # Use the structured prompt file with the data
@@ -233,17 +233,17 @@ jobs:
           echo "❌ All AI models failed, creating fallback analysis..."
           cat > ai_analysis_result.md << 'FALLBACK'
         ## 🔍 Content Review Summary (Automated Fallback)
-        
+
         ### 📋 Analysis Status
         - AI analysis temporarily unavailable
         - Fallback automated checks performed
-        
+
         ### ⚠️ Recommended Manual Review
         - Verify current job titles and roles
         - Check recent project information
         - Validate contact information and social links
         - Review technology skills for currency
-        
+
         ### 🔄 Next Steps
         - Manual review recommended
         - Re-run AI analysis when models are available
@@ -260,10 +260,10 @@ jobs:
         echo "**AI Model Used:** ${{ env.MODEL_USED }}" >> review_report.md
         echo "**Trigger:** ${{ github.event_name }}" >> review_report.md
         echo "" >> review_report.md
-        
+
         # Add the AI analysis
         cat ai_analysis_result.md >> review_report.md
-        
+
         echo "" >> review_report.md
         echo "---" >> review_report.md
         echo "" >> review_report.md
@@ -271,14 +271,14 @@ jobs:
         echo "- Resources analyzed: $(jq '. | length' resource_content.json)" >> review_report.md
         echo "- Website accessibility: $(jq -r '.sources.website.status' current_info.json)" >> review_report.md
         echo "- Analysis timestamp: $(jq -r '.timestamp' current_info.json)" >> review_report.md
-        
+
         # Set outputs for next step
         if grep -q "🚨 Critical Issues" ai_analysis_result.md && [ -s <(grep -A 10 "🚨 Critical Issues" ai_analysis_result.md | tail -n +2 | sed '/^$/,$d') ]; then
           echo "has_critical_issues=true" >> $GITHUB_OUTPUT
         else
           echo "has_critical_issues=false" >> $GITHUB_OUTPUT
         fi
-        
+
         if grep -q "⚠️ Potentially Outdated" ai_analysis_result.md && [ -s <(grep -A 10 "⚠️ Potentially Outdated" ai_analysis_result.md | tail -n +2 | sed '/^$/,$d') ]; then
           echo "has_outdated_content=true" >> $GITHUB_OUTPUT
         else
@@ -287,7 +287,7 @@ jobs:
 
     - name: 📝 Create GitHub Issue (if needed)
       if: |
-        (steps.generate-report.outputs.has_critical_issues == 'true' || 
+        (steps.generate-report.outputs.has_critical_issues == 'true' ||
          steps.generate-report.outputs.has_outdated_content == 'true') &&
         (github.event.inputs.create_issue != 'false')
       uses: actions/github-script@v7
@@ -295,17 +295,17 @@ jobs:
         script: |
           const fs = require('fs');
           const report = fs.readFileSync('review_report.md', 'utf8');
-          
+
           const issueBody = `${report}
 
           ---
-          
+
           ## 🔧 Action Items
           - [ ] Review flagged content for accuracy
           - [ ] Update outdated information in resource files
           - [ ] Verify external links and contact information
           - [ ] Consider adding more recent achievements or projects
-          
+
           ## 🤖 Automation Info
           This issue was automatically created by the AI Content Review workflow.
           - **Workflow run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -8,7 +8,7 @@ a Northern Ireland-based technology researcher, data scientist, and community bu
 
 import re
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any
 
 import requests
 from fastmcp import FastMCP
@@ -241,7 +241,7 @@ def send_contact_message(message: str, sender: str) -> str:
     # In a real implementation, you would integrate with email service here
     # For now, just return a confirmation
     return f"""Message received and queued for delivery to Andrew Bolster.
-    
+
 Message from: {sender}
 Timestamp: {timestamp}
 Length: {len(message)} characters
@@ -250,7 +250,7 @@ Note: This is currently a placeholder implementation. The message has been logge
 
 
 @mcp.tool()
-def check_availability(start_date: Optional[str] = None, days_ahead: int = 7) -> str:
+def check_availability(start_date: str | None = None, days_ahead: int = 7) -> str:
     """
     Check Andrew Bolster's calendar availability using his public iCal feed.
 
@@ -279,7 +279,7 @@ def check_availability(start_date: Optional[str] = None, days_ahead: int = 7) ->
 
         # Parse events from iCal content (basic parsing)
         events = []
-        current_event: Dict[str, Any] = {}
+        current_event: dict[str, Any] = {}
 
         for line in ical_content.split("\n"):
             line = line.strip()
@@ -334,7 +334,9 @@ def check_availability(start_date: Optional[str] = None, days_ahead: int = 7) ->
                 event_start = event["start"]
                 event_end = event["end"]
                 # Type guard to ensure they are datetime objects
-                if not isinstance(event_start, datetime) or not isinstance(event_end, datetime):
+                if not isinstance(event_start, datetime) or not isinstance(
+                    event_end, datetime
+                ):
                     continue
 
                 # Check if event overlaps with our time range
@@ -343,7 +345,7 @@ def check_availability(start_date: Optional[str] = None, days_ahead: int = 7) ->
 
         # Format the response
         if not relevant_events:
-            return f"""Calendar availability for {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}:
+            return f"""Calendar availability for {start_dt.strftime("%Y-%m-%d")} to {end_dt.strftime("%Y-%m-%d")}:
 
 ✅ No scheduled events found in the public calendar for this period.
 
@@ -357,7 +359,7 @@ Note: This shows only publicly visible calendar events. Private events and detai
                 summary = event.get("summary", "Busy")
                 event_list.append(f"  📅 {start_str} - {end_str}: {summary}")
 
-            return f"""Calendar availability for {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}:
+            return f"""Calendar availability for {start_dt.strftime("%Y-%m-%d")} to {end_dt.strftime("%Y-%m-%d")}:
 
 ⚠️  Scheduled events found:
 {chr(10).join(event_list)}
