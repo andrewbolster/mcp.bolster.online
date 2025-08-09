@@ -162,11 +162,11 @@ jobs:
                 async def access_resource():
                     async with Client(mcp) as client:
                         return await client.read_resource("resource://andrew-bolster/personal-website")
-                
+
                 result = await benchmark(access_resource)
                 assert result is not None
 
-            @pytest.mark.asyncio 
+            @pytest.mark.asyncio
             async def test_contact_tool_performance(self, benchmark):
                 async def send_message():
                     async with Client(mcp) as client:
@@ -174,7 +174,7 @@ jobs:
                             "message": "Performance test message",
                             "sender": "Benchmark Test"
                         })
-                
+
                 result = await benchmark(send_message)
                 assert "Message received" in result.data
         EOF

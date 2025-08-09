@@ -18,8 +18,19 @@ asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
-    "black>=25.1.0",
-    "isort>=6.0.1",
+    "ruff>=0.8.0",
     "mypy>=1.11.0",
     "types-requests>=2.31.0",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]  # Allow long lines in strings/docstrings
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

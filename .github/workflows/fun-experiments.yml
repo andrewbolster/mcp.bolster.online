@@ -55,7 +55,7 @@ jobs:
         uv run pytest test_app.py -v
         end_time=$(date +%s%N)
         duration=$((($end_time - $start_time) / 1000000))
-        
+
         echo "## 💪 ARM64 Performance Results" >> $GITHUB_STEP_SUMMARY
         echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
         echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -84,14 +84,14 @@ jobs:
     - name: 📊 Generate Dynamic Stats
       run: |
         uv sync
-        
+
         # Run tests and capture coverage
         coverage_output=$(uv run pytest test_app.py --cov=app --cov-report=term-missing 2>&1)
         coverage_percent=$(echo "$coverage_output" | grep -oE '[0-9]+%' | tail -1 | sed 's/%//')
-        
+
         # Count lines of code
         loc=$(find . -name '*.py' -not -path './.venv/*' -exec wc -l {} + | tail -1 | awk '{print $1}')
-        
+
         # Generate fun stats
         echo "COVERAGE_PERCENT=$coverage_percent" >> $GITHUB_ENV
         echo "LINES_OF_CODE=$loc" >> $GITHUB_ENV
@@ -129,7 +129,7 @@ jobs:
     - name: 🌐 Test MCP Server Functionality
       run: |
         uv sync
-        
+
         # Create health check script
         cat > health_check.py << 'EOF'
         import asyncio
@@ -138,13 +138,13 @@ jobs:
 
         async def health_check():
             print("🏥 Running MCP Server Health Check...")
-            
+
             results = {
                 "resources": 0,
                 "tools": 0,
                 "errors": []
             }
-            
+
             try:
                 async with Client(mcp) as client:
                     # Test all resources
@@ -157,7 +157,7 @@ jobs:
                         "resource://andrew-bolster/community-involvement",
                         "resource://andrew-bolster/technical-blog"
                     ]
-                    
+
                     for resource_uri in resources:
                         try:
                             result = await client.read_resource(resource_uri)
@@ -170,7 +170,7 @@ jobs:
                         except Exception as e:
                             print(f"❌ Resource {resource_uri}: ERROR - {e}")
                             results["errors"].append(f"Resource {resource_uri}: {e}")
-                    
+
                     # Test contact tool
                     try:
                         result = await client.call_tool("send_contact_message", {
@@ -186,16 +186,16 @@ jobs:
                     except Exception as e:
                         print(f"❌ Contact tool: ERROR - {e}")
                         results["errors"].append(f"Contact tool: {e}")
-            
+
             except Exception as e:
                 print(f"❌ Client connection: ERROR - {e}")
                 results["errors"].append(f"Client connection: {e}")
-            
+
             print(f"\n📊 Health Check Results:")
             print(f"Resources working: {results['resources']}/7")
             print(f"Tools working: {results['tools']}/1")
             print(f"Errors: {len(results['errors'])}")
-            
+
             if results["errors"]:
                 print(f"\n❌ Errors found:")
                 for error in results["errors"]:
@@ -207,7 +207,7 @@ jobs:
         if __name__ == "__main__":
             asyncio.run(health_check())
         EOF
-        
+
         uv run python health_check.py
 
   weekly-stats:
@@ -226,7 +226,7 @@ jobs:
         echo "## 📈 Weekly Statistics Report" >> $GITHUB_STEP_SUMMARY
         echo "Generated on: $(date)" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        
+
         # Git activity
         commits_this_week=$(git log --since='1 week ago' --oneline | wc -l)
         echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
@@ -235,13 +235,13 @@ jobs:
         echo "| Total commits | $(git rev-list --all --count) |" >> $GITHUB_STEP_SUMMARY
         echo "| Contributors | $(git log --format='%ae' | sort -u | wc -l) |" >> $GITHUB_STEP_SUMMARY
         echo "| Repository age | $((($(date +%s) - $(git log --reverse --format=%ct | head -1)) / 86400)) days |" >> $GITHUB_STEP_SUMMARY
-        
+
         # File stats
         python_files=$(find . -name '*.py' -not -path './.venv/*' | wc -l)
         test_files=$(find . -name 'test_*.py' | wc -l)
         echo "| Python files | $python_files |" >> $GITHUB_STEP_SUMMARY
         echo "| Test files | $test_files |" >> $GITHUB_STEP_SUMMARY
-        
+
         # Fun fact
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "🎯 **Fun Fact:** This report was generated automatically by GitHub Actions!" >> $GITHUB_STEP_SUMMARY

@@ -30,19 +30,14 @@ jobs:
     - name: 📦 Install dependencies and dev tools
       run: |
         uv sync
-        uv add --group dev ruff black isort mypy
 
     - name: ⚡ Run Ruff (super fast linter)
       run: |
         uv run ruff check . --output-format=github --target-version=py311
 
-    - name: 🎨 Check code formatting with Black
+    - name: 🎨 Check code formatting with Ruff
       run: |
-        uv run black --check --diff .
-
-    - name: 📤 Check import sorting with isort
-      run: |
-        uv run isort --check-only --diff .
+        uv run ruff format --check --diff .
 
     - name: 🔍 Type checking with mypy
       run: |
@@ -94,20 +89,16 @@ jobs:
     - name: 📦 Install formatters
       run: |
         uv sync
-        uv add --group dev black isort
 
-    - name: 🎨 Auto-format with Black
-      run: uv run black .
-
-    - name: 📤 Auto-sort imports with isort
-      run: uv run isort .
+    - name: 🎨 Auto-format with Ruff
+      run: uv run ruff format .
 
     - name: 🔄 Commit changes
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add -A
-        git diff --staged --quiet || git commit -m "🎨 Auto-format code with Black and isort"
+        git diff --staged --quiet || git commit -m "🎨 Auto-format code with Ruff"
         git push
 
   dependency-review:
