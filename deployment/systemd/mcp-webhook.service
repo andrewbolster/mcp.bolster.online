@@ -1,0 +1,44 @@
+[Unit]
+Description=MCP Bolster Webhook Listener
+Documentation=https://github.com/andrewbolster/mcp.bolster.online
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mcp.bolster.online
+
+# Command to start the webhook listener
+ExecStart=/usr/bin/webhook -hooks /opt/mcp.bolster.online/deployment/webhook.json -verbose -port 9000 -hotreload
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart configuration
+Restart=always
+RestartSec=3
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mcp.bolster.online /var/log
+ReadOnlyPaths=/opt/mcp.bolster.online
+
+# Resource limits
+LimitNOFILE=1024
+MemoryMax=128M
+CPUQuota=50%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mcp-webhook
+
+# Environment
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target

@@ -78,18 +78,18 @@ uv run pre-commit install
 uv run pre-commit run --all-files
 ```
 
-## Deployment
+## 🚀 Deployment
 
 ### nginx + Webhook Deployment
 
-This section covers deploying the MCP server on a Linux server using nginx as a reverse proxy and GitHub webhooks for automatic updates.
+This section covers deploying the MCP server on a Linux server using nginx as a reverse proxy and GitHub webhooks for automatic updates. All configuration files are maintained in this repository for easy version control and updates.
 
 #### 1. Server Setup
 
 **Install Dependencies:**
 ```bash
 sudo apt update
-sudo apt install nginx python3 python3-pip git
+sudo apt install nginx python3 python3-pip git webhook
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
@@ -107,200 +107,138 @@ cd mcp.bolster.online
 uv sync
 ```
 
-#### 2. Create Systemd Service
+#### 2. Configure System Services (using symlinks)
 
-Create `/etc/systemd/system/mcp-bolster.service`:
-```ini
-[Unit]
-Description=MCP Bolster Online Server
-After=network.target
+All configuration files are maintained in the repository under `deployment/`. Use symlinks to connect them to system locations:
 
-[Service]
-Type=simple
-User=www-data
-Group=www-data
-WorkingDirectory=/opt/mcp.bolster.online
-Environment=PATH=/opt/mcp.bolster.online/.venv/bin
-ExecStart=/opt/mcp.bolster.online/.venv/bin/python app.py
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**Enable and Start Service:**
+**Create systemd services:**
 ```bash
+# Link service files from repository
+sudo ln -sf /opt/mcp.bolster.online/deployment/systemd/mcp-bolster.service /etc/systemd/system/
+sudo ln -sf /opt/mcp.bolster.online/deployment/systemd/mcp-webhook.service /etc/systemd/system/
+
+# Enable and start services
 sudo systemctl daemon-reload
-sudo systemctl enable mcp-bolster
-sudo systemctl start mcp-bolster
-sudo systemctl status mcp-bolster
+sudo systemctl enable mcp-bolster mcp-webhook
+sudo systemctl start mcp-bolster mcp-webhook
+sudo systemctl status mcp-bolster mcp-webhook
 ```
 
-#### 3. nginx Configuration
-
-Create `/etc/nginx/sites-available/mcp.bolster.online`:
-```nginx
-server {
-    listen 80;
-    server_name mcp.bolster.online;
-
-    # MCP Server (if it serves HTTP)
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Webhook endpoint
-    location /webhook {
-        proxy_pass http://localhost:9000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-**Enable Site:**
+**Configure nginx:**
 ```bash
-sudo ln -s /etc/nginx/sites-available/mcp.bolster.online /etc/nginx/sites-enabled/
+# Link nginx configuration from repository
+sudo ln -sf /opt/mcp.bolster.online/deployment/nginx/mcp.bolster.online /etc/nginx/sites-available/
+sudo ln -sf /etc/nginx/sites-available/mcp.bolster.online /etc/nginx/sites-enabled/
+
+# Test and reload nginx
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-#### 4. GitHub Webhook Setup
+#### 3. Customize Webhook Configuration
 
-**Install webhook listener:**
+**Edit webhook secret:**
 ```bash
-sudo apt install webhook
-# Or compile from source for latest version
+# Edit the webhook configuration file
+nano /opt/mcp.bolster.online/deployment/webhook.json
+# Replace "YOUR_WEBHOOK_SECRET_HERE" with your actual secret
 ```
 
-**Create webhook configuration** `/opt/mcp.bolster.online/webhook.json`:
-```json
-[
-  {
-    "id": "mcp-bolster-deploy",
-    "execute-command": "/opt/mcp.bolster.online/deploy.sh",
-    "command-working-directory": "/opt/mcp.bolster.online",
-    "http-methods": ["POST"],
-    "match": [
-      {
-        "type": "payload-hash-sha256",
-        "secret": "YOUR_WEBHOOK_SECRET",
-        "parameter": {
-          "source": "header",
-          "name": "X-Hub-Signature-256"
-        }
-      },
-      {
-        "type": "value",
-        "value": "refs/heads/main",
-        "parameter": {
-          "source": "payload",
-          "name": "ref"
-        }
-      }
-    ]
-  }
-]
-```
-
-**Create deployment script** `/opt/mcp.bolster.online/deploy.sh`:
+**Restart webhook service after changes:**
 ```bash
-#!/bin/bash
-set -e
-
-cd /opt/mcp.bolster.online
-
-# Pull latest changes
-git pull origin main
-
-# Update dependencies
-uv sync
-
-# Run tests
-uv run pytest test_app.py
-
-# Restart service if tests pass
-sudo systemctl restart mcp-bolster
-
-# Log deployment
-echo "$(date): Deployment successful" >> /var/log/mcp-bolster-deploy.log
+sudo systemctl restart mcp-webhook
 ```
 
-**Make script executable:**
-```bash
-chmod +x /opt/mcp.bolster.online/deploy.sh
-```
+#### 4. GitHub Repository Setup
 
-**Create webhook systemd service** `/etc/systemd/system/mcp-webhook.service`:
-```ini
-[Unit]
-Description=MCP Bolster Webhook Listener
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-Group=www-data
-ExecStart=/usr/bin/webhook -hooks /opt/mcp.bolster.online/webhook.json -verbose -port 9000
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**Start webhook service:**
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable mcp-webhook
-sudo systemctl start mcp-webhook
-```
-
-#### 5. GitHub Repository Setup
-
-1. Go to your repository settings → Webhooks
+1. Go to repository settings → Webhooks
 2. Add webhook:
    - **Payload URL**: `http://mcp.bolster.online/webhook`
    - **Content type**: `application/json`
-   - **Secret**: Same as in `webhook.json`
+   - **Secret**: Same as configured in `deployment/webhook.json`
    - **Events**: Just push events
    - **Active**: ✓
 
-#### 6. SSL/HTTPS Setup (Optional)
+#### 5. SSL/HTTPS Setup (Recommended)
 
 ```bash
 sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d mcp.bolster.online
 ```
 
-#### 7. Monitoring
+#### 6. Deployment Features
+
+The deployment setup includes several advanced features:
+
+**Automatic Deployment Pipeline:**
+- ✅ Pulls latest code from `main` branch
+- ✅ Updates dependencies with `uv sync`
+- ✅ Runs full test suite before deployment
+- ✅ Performs security scans (Bandit, Safety)
+- ✅ Validates MCP server configuration
+- ✅ Zero-downtime restart with rollback on failure
+- ✅ Comprehensive logging with timestamps
+- ✅ Skip deployment with `[skip deploy]` in commit message
+
+**Security Features:**
+- 🔒 GitHub IP allowlist for webhook endpoint
+- 🔒 Rate limiting on webhook endpoint (5 requests/minute)
+- 🔒 Webhook signature verification
+- 🔒 Services run as `www-data` with limited permissions
+- 🔒 System protection with `ProtectSystem=strict`
+- 🔒 Resource limits (CPU, Memory, File descriptors)
+- 🔒 Security headers and sensitive file blocking
+
+**Monitoring & Maintenance:**
+- 📊 Structured logging to systemd journal
+- 📊 Deployment logs in `/var/log/mcp-bolster-deploy.log`
+- 📊 Health check endpoint at `/health`
+- 📊 Automatic service restart on failure
+- 📊 Hot-reload webhook configuration
+
+#### 7. Monitoring Commands
 
 **Check service status:**
 ```bash
-sudo systemctl status mcp-bolster
-sudo systemctl status mcp-webhook
+sudo systemctl status mcp-bolster mcp-webhook
 sudo journalctl -u mcp-bolster -f
-```
-
-**Check logs:**
-```bash
-tail -f /var/log/mcp-bolster-deploy.log
 sudo journalctl -u mcp-webhook -f
 ```
 
-#### Security Considerations
+**Check deployment logs:**
+```bash
+tail -f /var/log/mcp-bolster-deploy.log
+```
 
-- Use webhook secrets to verify GitHub requests
-- Run services with limited user permissions (www-data)
-- Implement fail-safe deployment (rollback on test failures)
-- Monitor deployment logs for security issues
-- Keep server and dependencies updated
+**Test deployment:**
+```bash
+# Manual deployment trigger (for testing)
+sudo /opt/mcp.bolster.online/deployment/deploy.sh
+```
 
-This setup provides automatic deployment triggered by GitHub pushes to the main branch, with nginx serving as a reverse proxy for both the MCP server and webhook listener.
+**Check configuration:**
+```bash
+# Test nginx configuration
+sudo nginx -t
+
+# Validate webhook configuration
+webhook -hooks /opt/mcp.bolster.online/deployment/webhook.json -verbose -dry-run
+```
+
+#### 8. Updating Configuration
+
+Since all configuration files are in the repository, updates are automatic:
+
+1. **Update configuration files** in the `deployment/` directory
+2. **Commit and push** changes to GitHub
+3. **Services automatically restart** with new configuration via symlinks
+4. **For immediate updates** without waiting for webhook:
+   ```bash
+   cd /opt/mcp.bolster.online
+   git pull origin main
+   sudo systemctl daemon-reload  # If systemd files changed
+   sudo systemctl restart mcp-bolster mcp-webhook
+   sudo systemctl reload nginx   # If nginx config changed
+   ```
+
+This approach provides version-controlled infrastructure with automatic deployments, comprehensive security, and easy maintenance.

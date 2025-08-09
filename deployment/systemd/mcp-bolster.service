@@ -1,0 +1,46 @@
+[Unit]
+Description=MCP Bolster Online Server
+Documentation=https://github.com/andrewbolster/mcp.bolster.online
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mcp.bolster.online
+
+# Environment variables
+Environment=PYTHONPATH=/opt/mcp.bolster.online
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/opt/mcp.bolster.online/.venv/bin:/usr/local/bin:/usr/bin:/bin
+
+# Command to start the service
+ExecStart=/opt/mcp.bolster.online/.venv/bin/python app.py
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart configuration
+Restart=always
+RestartSec=3
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mcp.bolster.online
+ReadOnlyPaths=/opt/mcp.bolster.online
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+CPUQuota=200%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mcp-bolster
+
+[Install]
+WantedBy=multi-user.target
