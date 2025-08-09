@@ -20,4 +20,6 @@ asyncio_mode = "auto"
 dev = [
     "black>=25.1.0",
     "isort>=6.0.1",
+    "mypy>=1.11.0",
+    "types-requests>=2.31.0",
 ]
