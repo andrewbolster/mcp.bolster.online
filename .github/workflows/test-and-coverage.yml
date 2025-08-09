@@ -20,9 +20,6 @@ jobs:
           # Test ARM64 runners (new GitHub feature!)
           - os: ubuntu-24.04-arm64
             python-version: "3.12"
-          # Test Windows Server 2025 (in preview!)
-          - os: windows-2025
-            python-version: "3.12"
 
     steps:
     - name: 📥 Checkout repository
