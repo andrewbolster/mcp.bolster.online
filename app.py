@@ -6,11 +6,12 @@ This MCP server provides curated resources and links about Andrew Bolster,
 a Northern Ireland-based technology researcher, data scientist, and community builder.
 """
 
-from fastmcp import FastMCP
-import requests
-from datetime import datetime, timedelta
 import re
+from datetime import datetime, timedelta
 from typing import Optional
+
+import requests
+from fastmcp import FastMCP
 
 # Initialize the MCP server
 mcp = FastMCP(

@@ -5,10 +5,12 @@ Test suite for Andrew Bolster MCP Resources Server
 Tests both resources and tools using FastMCP in-memory testing patterns.
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock, patch
+
+import pytest
 from fastmcp import Client
+
 from app import mcp
 
 
