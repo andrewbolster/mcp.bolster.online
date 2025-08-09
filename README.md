@@ -1,26 +1,44 @@
 # mcp.bolster.online
 
-[![🧪 Tests & Coverage](https://github.com/YOUR_USERNAME/mcp.bolster.online/actions/workflows/test-and-coverage.yml/badge.svg)](https://github.com/YOUR_USERNAME/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
-[![🔍 Code Quality](https://github.com/YOUR_USERNAME/mcp.bolster.online/actions/workflows/code-quality.yml/badge.svg)](https://github.com/YOUR_USERNAME/mcp.bolster.online/actions/workflows/code-quality.yml)
-[![🎮 Fun Experiments](https://github.com/YOUR_USERNAME/mcp.bolster.online/actions/workflows/fun-experiments.yml/badge.svg)](https://github.com/YOUR_USERNAME/mcp.bolster.online/actions/workflows/fun-experiments.yml)
-[![codecov](https://codecov.io/gh/YOUR_USERNAME/mcp.bolster.online/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR_USERNAME/mcp.bolster.online)
+[![🧪 Tests & Coverage](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml/badge.svg)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
+[![🔍 Code Quality](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/code-quality.yml/badge.svg)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/code-quality.yml)
+[![🎮 Fun Experiments](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/fun-experiments.yml/badge.svg)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/fun-experiments.yml)
+[![🤖 AI Content Review](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/ai-content-review.yml/badge.svg)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/ai-content-review.yml)
+[![codecov](https://codecov.io/gh/andrewbolster/mcp.bolster.online/branch/main/graph/badge.svg)](https://codecov.io/gh/andrewbolster/mcp.bolster.online)
 
 [![Python](https://img.shields.io/badge/Python-3.11%20|%203.12%20|%203.13-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![FastMCP](https://img.shields.io/badge/Framework-FastMCP-purple?logo=lightning&logoColor=white)](https://gofastmcp.com/)
+[![Ruff](https://img.shields.io/badge/Code%20Quality-Ruff-red?logo=ruff&logoColor=white)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/badge/Package%20Manager-uv-green?logo=python&logoColor=white)](https://github.com/astral-sh/uv)
 [![License](https://img.shields.io/badge/License-GPL--3.0-red?logo=gnu&logoColor=white)](LICENSE)
 
-[![ARM64 Support](https://img.shields.io/badge/ARM64-Supported-brightgreen?logo=arm&logoColor=white)](https://github.com/YOUR_USERNAME/mcp.bolster.online/actions/workflows/fun-experiments.yml)
-[![Windows 2025](https://img.shields.io/badge/Windows%202025-Preview-blue?logo=windows&logoColor=white)](https://github.com/YOUR_USERNAME/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
+[![ARM64 Support](https://img.shields.io/badge/ARM64-Supported-brightgreen?logo=arm&logoColor=white)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
+[![Pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://pre-commit.com/)
 
 An MCP (Model Context Protocol) server providing curated resources and tools about Andrew Bolster, including professional background, research interests, community involvement, and contact/availability tools.
 
-## Features
+## 🚀 Features
 
-- **Resources**: Comprehensive information about Andrew Bolster's professional profile, research, and community work
-- **Contact Tool**: Send messages for professional inquiries (with placeholder email integration)
-- **Availability Tool**: Check calendar availability using public iCal feed
-- **FastMCP**: Built using the FastMCP framework for efficient MCP server development
+### MCP Resources (7 available)
+- **Personal Website** - Main website and technical blog
+- **Professional Profile** - Current roles and expertise
+- **Farset Labs** - Belfast hackerspace co-founder information
+- **Social Media** - Professional networking profiles
+- **Research Interests** - Academic and technical focus areas
+- **Community Involvement** - Organizational roles and activities
+- **Technical Blog** - Writing and thought leadership
+
+### MCP Tools (2 available)
+- **Contact Tool** - Send professional inquiries (placeholder implementation)
+- **Availability Tool** - Check calendar availability via public iCal feed
+
+### Development Features
+- **FastMCP Framework** - Modern MCP server development
+- **92% Test Coverage** - Comprehensive test suite with pytest
+- **Multi-Platform Support** - Ubuntu (x64/ARM64), Python 3.11-3.13
+- **Modern Code Quality** - Ruff formatting/linting, mypy type checking
+- **Pre-commit Hooks** - Automated code quality checks
+- **GitHub Actions** - CI/CD with AI-powered content validation
 
 ## Development
 
@@ -30,20 +48,34 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 
 ### Setup
 ```bash
-git clone <repository-url>
+git clone https://github.com/andrewbolster/mcp.bolster.online.git
 cd mcp.bolster.online
 uv sync
 ```
 
 ### Running Tests
 ```bash
-uv run pytest test_app.py -v
-uv run pytest test_app.py --cov=app --cov-report=term-missing
+# Run tests with coverage
+uv run pytest test_app.py --cov=app --cov-report=term-missing -v
+
+# Run all quality checks (same as CI)
+uv run ruff check .          # Linting
+uv run ruff format --check . # Format checking
+uv run mypy app.py --ignore-missing-imports  # Type checking
 ```
 
 ### Running the Server
 ```bash
 uv run python app.py
+```
+
+### Pre-commit Setup
+```bash
+# Install pre-commit hooks (automatic code quality)
+uv run pre-commit install
+
+# Run pre-commit on all files
+uv run pre-commit run --all-files
 ```
 
 ## Deployment
@@ -70,7 +102,7 @@ sudo chown $USER:$USER /opt/mcp.bolster.online
 **Clone Repository:**
 ```bash
 cd /opt
-git clone https://github.com/YOUR_USERNAME/mcp.bolster.online.git
+git clone https://github.com/andrewbolster/mcp.bolster.online.git
 cd mcp.bolster.online
 uv sync
 ```
