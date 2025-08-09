@@ -1,0 +1,69 @@
+[
+  {
+    "id": "mcp-bolster-deploy",
+    "execute-command": "/opt/mcp.bolster.online/deployment/deploy.sh",
+    "command-working-directory": "/opt/mcp.bolster.online",
+    "http-methods": ["POST"],
+    "include-command-output-in-response": false,
+    "include-command-output-in-response-on-error": true,
+    "response-message": "Deployment triggered successfully",
+    "match": [
+      {
+        "type": "payload-hash-sha256",
+        "secret": "YOUR_WEBHOOK_SECRET_HERE",
+        "parameter": {
+          "source": "header",
+          "name": "X-Hub-Signature-256"
+        }
+      },
+      {
+        "type": "value",
+        "value": "refs/heads/main",
+        "parameter": {
+          "source": "payload",
+          "name": "ref"
+        }
+      }
+    ],
+    "pass-arguments-to-command": [
+      {
+        "source": "payload",
+        "name": "head_commit.id"
+      },
+      {
+        "source": "payload",
+        "name": "head_commit.message"
+      },
+      {
+        "source": "payload",
+        "name": "pusher.name"
+      }
+    ],
+    "trigger-rule": {
+      "and": [
+        {
+          "match": {
+            "type": "value",
+            "value": "refs/heads/main",
+            "parameter": {
+              "source": "payload",
+              "name": "ref"
+            }
+          }
+        },
+        {
+          "not": {
+            "match": {
+              "type": "regex",
+              "regex": "\\[skip deploy\\]",
+              "parameter": {
+                "source": "payload",
+                "name": "head_commit.message"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+]
