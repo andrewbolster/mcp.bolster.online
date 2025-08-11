@@ -53,11 +53,21 @@ uv run safety check || log_message "WARNING: Safety vulnerability check had warn
 
 # Validate configuration
 log_message "Validating MCP server configuration"
-timeout 10s uv run python -c "
+timeout 15s uv run python -c "
 import app
 print('✅ MCP server configuration is valid')
 print(f'✅ Resources: {len([name for name in dir(app) if name.startswith(\"get_\")])}')
 print(f'✅ Tools: 2 (send_contact_message, check_availability)')
+
+# Test that FastMCP server can initialize
+try:
+    from fastmcp import FastMCP
+    print('✅ FastMCP framework is available')
+    # Quick validation that the server instance is created correctly
+    print(f'✅ Server name: {app.mcp.name}')
+except Exception as e:
+    print(f'❌ FastMCP validation failed: {e}')
+    exit(1)
 " || handle_error "Configuration validation"
 
 # Start the service
