@@ -1,9 +1,9 @@
 # mcp.bolster.online
 
-[![🧪 Tests & Coverage](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml/badge.svg)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
-[![🔍 Code Quality](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/code-quality.yml/badge.svg)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/code-quality.yml)
-[![🎮 Fun Experiments](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/fun-experiments.yml/badge.svg)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/fun-experiments.yml)
-[![🤖 AI Content Review](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/ai-content-review.yml/badge.svg)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/ai-content-review.yml)
+[![🧪 Tests & Coverage](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml/badge.svg?branch=main)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
+[![🔍 Code Quality](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/code-quality.yml/badge.svg?branch=main)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/code-quality.yml)
+[![🎮 Fun Experiments](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/fun-experiments.yml/badge.svg?branch=main)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/fun-experiments.yml)
+[![🤖 AI Content Review](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/ai-content-review.yml/badge.svg?branch=main)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/ai-content-review.yml)
 [![codecov](https://codecov.io/gh/andrewbolster/mcp.bolster.online/branch/main/graph/badge.svg)](https://codecov.io/gh/andrewbolster/mcp.bolster.online)
 
 [![Python](https://img.shields.io/badge/Python-3.11%20|%203.12%20|%203.13-blue?logo=python&logoColor=white)](https://www.python.org/)
@@ -12,8 +12,10 @@
 [![uv](https://img.shields.io/badge/Package%20Manager-uv-green?logo=python&logoColor=white)](https://github.com/astral-sh/uv)
 [![License](https://img.shields.io/badge/License-GPL--3.0-red?logo=gnu&logoColor=white)](LICENSE)
 
-[![ARM64 Support](https://img.shields.io/badge/ARM64-Supported-brightgreen?logo=arm&logoColor=white)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
+[![Test Coverage](https://img.shields.io/badge/Coverage-92%25-brightgreen?logo=codecov&logoColor=white)](https://codecov.io/gh/andrewbolster/mcp.bolster.online)
+[![ARM64 Testing](https://img.shields.io/badge/ARM64-Experimental-yellow?logo=arm&logoColor=white)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
 [![Pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://pre-commit.com/)
+[![Deployment](https://img.shields.io/badge/Deployment-Ready-success?logo=docker&logoColor=white)](https://github.com/andrewbolster/mcp.bolster.online/tree/main/deployment)
 
 An MCP (Model Context Protocol) server providing curated resources and tools about Andrew Bolster, including professional background, research interests, community involvement, and contact/availability tools.
 
