@@ -13,7 +13,7 @@
 [![License](https://img.shields.io/badge/License-GPL--3.0-red?logo=gnu&logoColor=white)](LICENSE)
 
 [![Test Coverage](https://img.shields.io/badge/Coverage-92%25-brightgreen?logo=codecov&logoColor=white)](https://codecov.io/gh/andrewbolster/mcp.bolster.online)
-[![ARM64 Testing](https://img.shields.io/badge/ARM64-Experimental-yellow?logo=arm&logoColor=white)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
+[![Multi-Platform](https://img.shields.io/badge/Ubuntu-Latest%20%7C%2022.04-orange?logo=ubuntu&logoColor=white)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
 [![Pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://pre-commit.com/)
 [![Deployment](https://img.shields.io/badge/Deployment-Ready-success?logo=docker&logoColor=white)](https://github.com/andrewbolster/mcp.bolster.online/tree/main/deployment)
 
@@ -37,7 +37,7 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 ### Development Features
 - **FastMCP Framework** - Modern MCP server development
 - **92% Test Coverage** - Comprehensive test suite with pytest
-- **Multi-Platform Support** - Ubuntu (x64/ARM64), Python 3.11-3.13
+- **Multi-Platform Support** - Ubuntu Latest & 22.04, Python 3.11-3.13
 - **Modern Code Quality** - Ruff formatting/linting, mypy type checking
 - **Pre-commit Hooks** - Automated code quality checks
 - **GitHub Actions** - CI/CD with AI-powered content validation
