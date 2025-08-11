@@ -29,40 +29,6 @@ jobs:
         echo "- Features contact and availability tools" >> $GITHUB_STEP_SUMMARY
         echo "- Current test coverage: 92%" >> $GITHUB_STEP_SUMMARY
 
-  arm64-performance-test:
-    name: 💪 ARM64 Performance Test
-    runs-on: ubuntu-24.04-arm64
-    continue-on-error: true # ARM64 is still experimental
-
-    steps:
-    - name: 📥 Checkout repository
-      uses: actions/checkout@v4
-
-    - name: 🐍 Set up Python on ARM64
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-
-    - name: 🔧 Install uv
-      run: |
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-    - name: ⚡ ARM64 Performance Benchmark
-      run: |
-        uv sync
-        start_time=$(date +%s%N)
-        uv run pytest test_app.py -v
-        end_time=$(date +%s%N)
-        duration=$((($end_time - $start_time) / 1000000))
-
-        echo "## 💪 ARM64 Performance Results" >> $GITHUB_STEP_SUMMARY
-        echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-        echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Architecture | ARM64 🚀 |" >> $GITHUB_STEP_SUMMARY
-        echo "| Test Duration | ${duration}ms |" >> $GITHUB_STEP_SUMMARY
-        echo "| Runner | ubuntu-24.04-arm64 |" >> $GITHUB_STEP_SUMMARY
-
   creative-badges:
     name: 🏆 Dynamic Badge Generator
     runs-on: ubuntu-latest
