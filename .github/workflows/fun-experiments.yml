@@ -2,6 +2,8 @@ name: 🎮 Fun Experiments & Cool Features
 
 on:
   push:
+    branches: [ main, develop ]
+  pull_request:
     branches: [ main ]
   workflow_dispatch:
   schedule:
@@ -12,7 +14,8 @@ jobs:
   github-models-playground:
     name: 🤖 GitHub Models AI Playground
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 15
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
 
     steps:
     - name: 📥 Checkout repository
@@ -32,6 +35,7 @@ jobs:
   creative-badges:
     name: 🏆 Dynamic Badge Generator
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
     - name: 📥 Checkout repository
@@ -77,6 +81,7 @@ jobs:
   api-health-check:
     name: 🌐 MCP Server Health Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
     - name: 📥 Checkout repository
@@ -179,6 +184,7 @@ jobs:
   weekly-stats:
     name: 📈 Weekly Statistics Report
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.schedule == '0 2 * * 0' # Only on weekly schedule
 
     steps:

@@ -11,7 +11,7 @@ jobs:
   code-quality:
     name: 🚀 Code Quality Checks
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
     - name: 📥 Checkout repository
@@ -70,7 +70,7 @@ jobs:
     name: 🎨 Auto-format Code
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
     - name: 📥 Checkout repository
@@ -108,7 +108,7 @@ jobs:
     name: 📦 Dependency Review
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
     - name: 📥 Checkout repository
