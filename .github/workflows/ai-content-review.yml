@@ -1,6 +1,8 @@
 name: 🤖 AI Content Review & Validation
 
 on:
+  push:
+    branches: [ main, develop ]
   schedule:
     # Run monthly on the 1st at 9 AM UTC
     - cron: '0 9 1 * *'
@@ -26,6 +28,7 @@ jobs:
   ai-content-review:
     name: 🧠 AI-Powered Resource Review
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
     - name: 📥 Checkout repository
@@ -37,6 +40,7 @@ jobs:
         python-version: '3.12'
 
     - name: 🔧 Install uv and dependencies
+      timeout-minutes: 10
       run: |
         curl -LsSf https://astral.sh/uv/install.sh | sh
         echo "$HOME/.cargo/bin" >> $GITHUB_PATH
@@ -44,6 +48,7 @@ jobs:
 
     - name: 📝 Extract Resource Content
       id: extract-content
+      timeout-minutes: 5
       run: |
         # Create content extractor script
         cat > extract_resources.py << 'EOF'
@@ -89,6 +94,7 @@ jobs:
 
     - name: 🌐 Fetch Current Online Information
       id: fetch-current
+      timeout-minutes: 5
       run: |
         # Create web fetcher for current info
         cat > fetch_current_info.py << 'EOF'
@@ -147,13 +153,19 @@ jobs:
 
     - name: 🤖 AI Content Analysis with GitHub Models
       id: ai-analysis
+      timeout-minutes: 15
       run: |
-        # Install GitHub CLI with models extension
-        type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
-        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-        sudo apt update
-        sudo apt install gh -y
+        # Install GitHub CLI with models extension (with timeout protection)
+        timeout 300 bash -c '
+          type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh -y
+        ' || {
+          echo "❌ GitHub CLI installation timed out after 5 minutes"
+          echo "SKIP_AI_ANALYSIS=true" >> $GITHUB_ENV
+        }
 
         # Create AI analysis prompt
         cat > content_review_prompt.md << 'EOF'
@@ -207,27 +219,32 @@ jobs:
         echo "" >> analysis_input.md
         cat content_review_prompt.md >> analysis_input.md
 
-        # Use GitHub Models for AI analysis
-        echo "🤖 Starting AI analysis with GitHub Models..."
+        # Skip AI analysis if GitHub CLI installation failed
+        if [ "$SKIP_AI_ANALYSIS" = "true" ]; then
+          echo "⏭️ Skipping AI analysis due to GitHub CLI installation failure"
+        else
+          # Use GitHub Models for AI analysis
+          echo "🤖 Starting AI analysis with GitHub Models..."
 
-        # Try different models in order of preference
-        MODELS=("gpt-4o-mini" "Meta-Llama-3.1-70B-Instruct" "Mistral-large-2407")
+          # Try different models in order of preference
+          MODELS=("gpt-4o-mini" "Meta-Llama-3.1-70B-Instruct" "Mistral-large-2407")
 
-        for MODEL in "${MODELS[@]}"; do
-          echo "Trying model: $MODEL"
-          # Use the structured prompt file with the data
-          if gh models run "$MODEL" --prompt .github/prompts/content-review.yml < analysis_input.md > ai_analysis_result.md 2>/dev/null; then
-            echo "✅ Successfully analyzed with $MODEL using structured prompt"
-            echo "MODEL_USED=$MODEL" >> $GITHUB_ENV
-            break
-          elif gh models run "$MODEL" < analysis_input.md > ai_analysis_result.md 2>/dev/null; then
-            echo "✅ Successfully analyzed with $MODEL (fallback to inline prompt)"
-            echo "MODEL_USED=$MODEL" >> $GITHUB_ENV
-            break
-          else
-            echo "❌ Failed with $MODEL, trying next..."
-          fi
-        done
+          for MODEL in "${MODELS[@]}"; do
+            echo "Trying model: $MODEL"
+            # Use the structured prompt file with the data
+            if timeout 300 gh models run "$MODEL" --prompt .github/prompts/content-review.yml < analysis_input.md > ai_analysis_result.md 2>/dev/null; then
+              echo "✅ Successfully analyzed with $MODEL using structured prompt"
+              echo "MODEL_USED=$MODEL" >> $GITHUB_ENV
+              break
+            elif timeout 300 gh models run "$MODEL" < analysis_input.md > ai_analysis_result.md 2>/dev/null; then
+              echo "✅ Successfully analyzed with $MODEL (fallback to inline prompt)"
+              echo "MODEL_USED=$MODEL" >> $GITHUB_ENV
+              break
+            else
+              echo "❌ Failed with $MODEL, trying next..."
+            fi
+          done
+        fi
 
         if [ ! -f ai_analysis_result.md ] || [ ! -s ai_analysis_result.md ]; then
           echo "❌ All AI models failed, creating fallback analysis..."
