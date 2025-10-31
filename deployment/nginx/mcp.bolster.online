@@ -1,5 +1,8 @@
+# Rate limiting for webhook endpoint
+limit_req_zone $binary_remote_addr zone=webhook:10m rate=5r/m;
+
 server {
-    listen 80;
+    listen 443 ssl;
     server_name mcp.bolster.online;
 
     # Security headers
@@ -7,9 +10,6 @@ server {
     add_header X-Content-Type-Options nosniff always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-
-    # Rate limiting for webhook endpoint
-    limit_req_zone $binary_remote_addr zone=webhook:10m rate=5r/m;
 
     # Webhook endpoint for GitHub deployments
     location /webhook {
@@ -90,4 +90,17 @@ server {
     # Logging
     access_log /var/log/nginx/mcp.bolster.online.access.log;
     error_log /var/log/nginx/mcp.bolster.online.error.log;
+
+    # SSL Configuration (managed by Certbot)
+    ssl_certificate /etc/letsencrypt/live/mcp.bolster.online/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mcp.bolster.online/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+}
+
+# HTTP to HTTPS redirect
+server {
+    listen 80;
+    server_name mcp.bolster.online;
+    return 301 https://$host$request_uri;
 }
