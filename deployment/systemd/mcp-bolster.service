@@ -16,7 +16,7 @@ Environment=PYTHONUNBUFFERED=1
 Environment=PATH=/opt/mcp.bolster.online/.venv/bin:/usr/local/bin:/usr/bin:/bin
 
 # Command to start the service
-ExecStart=/opt/mcp.bolster.online/.venv/bin/fastmcp run app.py:mcp --transport=http --port=9001
+ExecStart=/opt/mcp.bolster.online/.venv/bin/fastmcp run app.py:mcp --transport=http --port 9001
 ExecReload=/bin/kill -HUP $MAINPID
 
 # Restart configuration
