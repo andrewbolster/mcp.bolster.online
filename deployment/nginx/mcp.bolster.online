@@ -10,19 +10,21 @@ server {
     add_header X-Content-Type-Options nosniff always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    include snippets/security-headers.conf;
+
 
     # Webhook endpoint for GitHub deployments
     location /webhook {
         limit_req zone=webhook burst=3 nodelay;
 
-        # Only allow GitHub IPs (you may want to update these)
-        allow 140.82.112.0/20;
-        allow 185.199.108.0/22;
-        allow 192.30.252.0/22;
-        allow 143.55.64.0/20;
-        deny all;
+        # Temporarily disable GitHub IP allowlist for testing
+        # allow 140.82.112.0/20;
+        # allow 185.199.108.0/22;
+        # allow 192.30.252.0/22;
+        # allow 143.55.64.0/20;
+        # deny all;
 
-        proxy_pass http://localhost:9000;
+        proxy_pass http://localhost:9000/hooks/mcp-bolster-deploy;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -91,16 +93,20 @@ server {
     access_log /var/log/nginx/mcp.bolster.online.access.log;
     error_log /var/log/nginx/mcp.bolster.online.error.log;
 
-    # SSL Configuration (managed by Certbot)
-    ssl_certificate /etc/letsencrypt/live/mcp.bolster.online/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/mcp.bolster.online/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    ssl_certificate /etc/letsencrypt/live/mcp.bolster.online/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/mcp.bolster.online/privkey.pem; # managed by Certbot
 }
 
-# HTTP to HTTPS redirect
+
 server {
+    if ($host = mcp.bolster.online) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
     listen 80;
     server_name mcp.bolster.online;
-    return 301 https://$host$request_uri;
+    return 404; # managed by Certbot
+
+
 }
