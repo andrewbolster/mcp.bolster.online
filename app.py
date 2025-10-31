@@ -7,6 +7,7 @@ a Northern Ireland-based technology researcher, data scientist, and community bu
 """
 
 import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -51,26 +52,35 @@ def get_professional_profile() -> str:
     return """# Andrew Bolster - Professional Profile
 
 ## Current Roles
-- **Senior R&D Manager (Data Science)** at Black Duck Software
+- **Head of Data Science** at Black Duck Software
 - **Director and Treasurer** at BSides Belfast
+- **Director** at Northern Ireland Open Government Network
 
 ## Background
 - PhD Research at University of Liverpool (Anglo-French Defence Programme)
-- Former Data Scientist at AlertLogic
-- Specializes in autonomous underwater vehicles and trust frameworks
-- Extensive experience in machine learning and cybersecurity
+- Former Data Scientist at AlertLogic, Sensum Co
+- Specializes in AI/ML productionisation, cybersecurity, and trust frameworks
+- Extensive experience in enterprise AI adoption and LLM governance
 
 ## Key Areas of Expertise
-- Data Science and Machine Learning
+- AI/LLM Productionisation and Governance
+- Data Science and Machine Learning Operations (MLOps/LLMOps)
 - Generative AI and AI Ethics
-- Autonomous Systems
-- Software Development
-- Cybersecurity and Trust Frameworks
+- Cybersecurity AI Applications
+- Data Governance and Privacy
+- Enterprise AI Strategy and Implementation
+
+## Leadership Experience
+- Managing cross-functional data science teams
+- Leading AI tools review board and approval processes
+- Establishing data mobility standards and governance frameworks
+- "Data Tzar" for enterprise data privacy and cataloging
 
 ## Academic Achievements
 - Queen's University Belfast TG Christie Award
 - Queen's University Belfast Linggard Prize
 - IET Excellence Grant for Academic Progress and STEM outreach
+- Fellow of the Royal Statistical Society
 """
 
 
@@ -106,22 +116,32 @@ def get_social_media() -> str:
     """Andrew Bolster's social media and professional networking profiles."""
     return """# Andrew Bolster - Social Media & Professional Networks
 
-## Professional Profiles
+## Primary Professional Profiles
 - **LinkedIn:** https://www.linkedin.com/in/andrewbolster/
 - **GitHub:** https://github.com/andrewbolster
 - **X (Twitter):** https://x.com/bolster
+- **Personal Website:** https://andrewbolster.info/
+- **Email:** andrew@bolster.online
+- **Phone:** +447783249547
 
-## Professional Activities
-- Regular speaker at technology conferences
-- Active contributor to open source projects
-- Technical blogger and thought leader
-- Community organizer and mentor
+## Professional Activities & Presence
+- **Thought Leadership:** Regular expert commentary in Forbes, DarkReading, SecurityBuzz, Computer Weekly
+- **Technical Blogging:** Active blog at andrewbolster.info with 15+ years of technical content
+- **Conference Speaking:** TEDx, NIDC, Dublin Tech Summit, BelTech, PyConIE
+- **Academic Engagement:** Guest lectures at University of Ulster MSc Data Analytics
+- **Open Source:** Active contributor to various projects, especially in data science and security
 
-## Conference Speaking
-- TEDx appearances
-- Regional and national innovation conferences
-- International trade delegations representing Northern Ireland tech community
-- BSides Belfast and other security conferences
+## Conference Speaking & Media
+- **TEDx Belfast:** "Dr Strange Sub or How I learned to stop worrying and accept Emergence"
+- **Recent Speaking:** Dublin Tech Summit 2025, Northern Ireland Developers Conference
+- **Media Appearances:** Regular interviews and commentary on AI, cybersecurity, and technology trends
+- **International Representation:** Trade delegations representing Northern Ireland tech community
+- **Community Events:** BSides Belfast, InfoSec NI, PyBelfast, BLUG
+
+## Online Presence
+- **Blog RSS Feed:** https://feeds.feedburner.com/ofpenguinsandcoffee
+- **Professional Resume:** https://andrewbolster.info/resume/
+- **Current Status:** https://andrewbolster.info/now/
 """
 
 
@@ -161,28 +181,39 @@ def get_community_involvement() -> str:
     return """# Andrew Bolster - Community Involvement
 
 ## Current Organizational Roles
-- **Director and Treasurer:** BSides Belfast (Information Security Conference)
-- **Founding Director:** Farset Labs (Belfast Hackerspace)
-- **Treasurer:** Open Government Northern Ireland
-- **Steering Group Member:** InfoSec NI
+- **Director and Treasurer:** BSides Belfast CIC (Information Security Conference) - organizing BSides Belfast 2025
+- **Director:** Northern Ireland Open Government Network
+- **Active Member:** InfoSec NI - seeking attendees and supporters
+
+## Recent Leadership Transitions
+- **Former Founding Director:** Farset Labs (Belfast Hackerspace, 2011-2024) - stepped down in 2024 after 13 years of leadership
+- Continuing to support Farset Labs as community member and advocate
+
+## Current Community Needs & Initiatives
+- **BSides Belfast 2025:** Actively seeking sponsors for Northern Ireland's premier information security conference
+- **InfoSec NI:** Growing the cybersecurity community and seeking new attendees
+- **Farset Labs:** Encouraging ongoing community support and donations for Belfast's hackerspace
 
 ## Community Activities
-- **STEM Outreach:** Active in science and technology education initiatives
-- **Mentorship:** Supporting emerging technology professionals
-- **Public Speaking:** Regular appearances at conferences and events
-- **Policy Engagement:** Contributing to Northern Ireland innovation strategy discussions
+- **Thought Leadership:** Regular expert commentary in Forbes, DarkReading, and cybersecurity publications
+- **Education:** Guest lectures at University of Ulster MSc Data Analytics program
+- **Mentorship:** Supporting emerging technology and cybersecurity professionals
+- **Public Speaking:** Regular appearances at tech conferences, AI summits, and industry events
+- **Policy Engagement:** Contributing to AI governance and Northern Ireland innovation strategy
 
 ## Recognition and Awards
+- Fellow of the Royal Statistical Society
 - Queen's University Belfast TG Christie Award (most promising incoming research student)
 - Queen's University Belfast Linggard Prize (best Masters project in Communication Engineering)
 - IET Excellence Grant for Academic Progress and STEM outreach activities
 
 ## Community Impact
-Andrew has been instrumental in building Northern Ireland's technology ecosystem, particularly through:
-- Establishing collaborative spaces for technologists
-- Promoting innovation and entrepreneurship
-- Representing NI tech community internationally
-- Supporting diversity and inclusion in technology
+Andrew has been instrumental in building Northern Ireland's technology ecosystem over 13+ years, particularly through:
+- Co-founding and scaling Farset Labs as Northern Ireland's first hackerspace
+- Establishing Belfast as a recognized hub for cybersecurity expertise through BSides Belfast
+- Representing NI tech community internationally at conferences and trade delegations
+- Promoting AI governance and ethical technology adoption in enterprise environments
+- Supporting diversity and inclusion in technology through mentorship and outreach
 """
 
 
@@ -370,6 +401,94 @@ Note: This shows only publicly visible calendar events. For detailed scheduling 
         return f"Error fetching calendar data: {str(e)}. Please try again later or contact directly."
     except Exception as e:
         return f"Error processing calendar information: {str(e)}. Please contact directly for availability."
+
+
+@mcp.tool()
+def get_recent_blog_posts(limit: int = 5) -> str:
+    """
+    Fetch recent blog posts from Andrew Bolster's RSS feed.
+
+    Args:
+        limit: Number of recent posts to return (default: 5, max: 10)
+
+    Returns:
+        Formatted list of recent blog posts with titles, dates, and truncated descriptions
+    """
+    try:
+        # Limit the number of posts to prevent excessive responses
+        limit = min(max(1, limit), 10)
+
+        # Fetch the RSS feed
+        rss_url = "https://feeds.feedburner.com/ofpenguinsandcoffee"
+        response = requests.get(rss_url, timeout=10)
+        response.raise_for_status()
+
+        # Parse the XML
+        root = ET.fromstring(response.content)
+
+        # Find the channel and items
+        channel = root.find("channel")
+        if channel is None:
+            return "Error: Could not find RSS channel in feed."
+
+        items = channel.findall("item")
+
+        if not items:
+            return "No blog posts found in the RSS feed."
+
+        # Process the most recent items
+        recent_posts = []
+        for item in items[:limit]:
+            title_elem = item.find("title")
+            link_elem = item.find("link")
+            description_elem = item.find("description")
+            pub_date_elem = item.find("pubDate")
+
+            title = (
+                (title_elem.text or "No title")
+                if title_elem is not None
+                else "No title"
+            )
+            link = (link_elem.text or "No link") if link_elem is not None else "No link"
+            description = (
+                (description_elem.text or "No description")
+                if description_elem is not None
+                else "No description"
+            )
+            pub_date = (
+                (pub_date_elem.text or "No date")
+                if pub_date_elem is not None
+                else "No date"
+            )
+
+            # Truncate description to 500 characters for LLM friendliness
+            if len(description) > 500:
+                description = description[:497] + "..."
+
+            # Clean up any HTML tags in description
+            description = re.sub(r"<[^>]+>", "", description)
+            description = description.strip()
+
+            recent_posts.append(f"""**{title}**
+Date: {pub_date}
+URL: {link}
+Summary: {description}
+""")
+
+        return f"""# Recent Blog Posts from Andrew Bolster
+
+Showing {len(recent_posts)} most recent posts from https://andrewbolster.info/
+
+{chr(10).join(recent_posts)}
+
+Note: Descriptions are truncated to 500 characters for readability. Visit the full URLs for complete articles."""
+
+    except requests.RequestException as e:
+        return f"Error fetching RSS feed: {str(e)}. Please try again later or visit https://andrewbolster.info/ directly."
+    except ET.ParseError as e:
+        return f"Error parsing RSS feed: {str(e)}. The feed format may have changed."
+    except Exception as e:
+        return f"Error processing RSS feed: {str(e)}. Please try again later."
 
 
 if __name__ == "__main__":
