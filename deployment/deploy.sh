@@ -35,25 +35,27 @@ git pull origin main || handle_error "Git pull"
 
 # Update dependencies
 log_message "Updating dependencies"
-uv sync || handle_error "Dependency update"
+# Use which to find uv in PATH, with fallback to known location
+UV_CMD=$(which uv || echo "/home/bolster/.local/bin/uv")
+$UV_CMD sync || handle_error "Dependency update"
 
 # Run pre-commit checks
 log_message "Running code quality checks"
-uv run pre-commit run --all-files || log_message "WARNING: Pre-commit checks had issues"
+$UV_CMD run pre-commit run --all-files || log_message "WARNING: Pre-commit checks had issues"
 
 # Run tests to ensure deployment is safe
 log_message "Running test suite"
-uv run pytest test_app.py --cov=app -v || handle_error "Tests failed"
+$UV_CMD run pytest test_app.py --cov=app -v || handle_error "Tests failed"
 
 # Run security scans
 log_message "Running security scans"
-uv add --group dev bandit safety || true
-uv run bandit -r app.py || log_message "WARNING: Bandit security scan had warnings"
-uv run safety check || log_message "WARNING: Safety vulnerability check had warnings"
+$UV_CMD add --group dev bandit safety || true
+$UV_CMD run bandit -r app.py || log_message "WARNING: Bandit security scan had warnings"
+$UV_CMD run safety check || log_message "WARNING: Safety vulnerability check had warnings"
 
 # Validate configuration
 log_message "Validating MCP server configuration"
-timeout 15s uv run python -c "
+timeout 15s $UV_CMD run python -c "
 import app
 print('✅ MCP server configuration is valid')
 print(f'✅ Resources: {len([name for name in dir(app) if name.startswith(\"get_\")])}')
