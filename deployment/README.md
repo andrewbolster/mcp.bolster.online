@@ -32,11 +32,12 @@ deployment/
 ### `webhook.json`
 - **Purpose**: Configuration for the webhook listener service
 - **Features**:
-  - GitHub signature verification
+  - GitHub SHA-256 signature verification (X-Hub-Signature-256)
   - Branch filtering (only `main` branch)
   - Skip deployment with `[skip deploy]` in commit message
   - Rate limiting and security controls
-- **Customization**: Update `YOUR_WEBHOOK_SECRET_HERE` with your actual webhook secret
+- **Security**: Uses `$WEBHOOK_SECRET` environment variable reference (2025 best practice)
+- **Deployment**: Set `WEBHOOK_SECRET` environment variable on server before starting webhook service
 - **Location**: Referenced by webhook service at `/opt/mcp.bolster.online/deployment/webhook.json`
 
 ### `nginx/mcp.bolster.online`
@@ -81,10 +82,13 @@ deployment/
 
 - **Process Isolation**: Services run as `www-data` with limited permissions
 - **Resource Limits**: CPU, memory, and file descriptor limits
-- **Network Security**: GitHub IP allowlist, rate limiting, signature verification
+- **Network Security**: GitHub IP allowlist, rate limiting, SHA-256 signature verification
 - **System Hardening**: `ProtectSystem=strict`, `NoNewPrivileges=true`
 - **Secure Headers**: X-Frame-Options, X-Content-Type-Options, etc.
 - **File Protection**: Block access to sensitive files (`.env`, `.log`, etc.)
+- **Secret Management**: Environment variable references (no hardcoded secrets)
+- **Pre-commit Security**: GitGuardian secret scanning, Bandit vulnerability checks
+- **Git History Protection**: Secrets removed from all git history using filter-branch
 
 ## Maintenance
 
@@ -126,9 +130,20 @@ sudo systemctl reload nginx
 
 ### Common Issues
 1. **Permission Errors**: Ensure `www-data` can read repository files
-2. **Webhook Secret Mismatch**: Verify secret in `webhook.json` matches GitHub
-3. **Port Conflicts**: Ensure ports 8000 and 9000 are available
-4. **SSL Certificate**: Use certbot for HTTPS setup
+2. **Webhook Secret Mismatch**: Verify `WEBHOOK_SECRET` environment variable matches GitHub webhook secret
+3. **Environment Variable Missing**: Ensure `WEBHOOK_SECRET` is set before starting webhook service
+4. **Port Conflicts**: Ensure ports 8000 and 9000 are available
+5. **SSL Certificate**: Use certbot for HTTPS setup
+
+### Environment Variable Setup
+```bash
+# Set the webhook secret environment variable
+export WEBHOOK_SECRET="your-github-webhook-secret-here"
+
+# For systemd services, add to service file or environment file
+# /etc/systemd/system/mcp-webhook.service.d/environment.conf:
+# Environment=WEBHOOK_SECRET=your-github-webhook-secret-here
+```
 
 ### Log Locations
 - **nginx**: `/var/log/nginx/mcp.bolster.online.access.log`
