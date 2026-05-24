@@ -9,6 +9,13 @@ a Northern Ireland-based technology researcher, data scientist, and community bu
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as pkg_version
+
+try:
+    _SERVER_VERSION = pkg_version("mcp-bolster-online")
+except PackageNotFoundError:
+    _SERVER_VERSION = None
 from typing import Any
 
 import requests
@@ -17,6 +24,7 @@ from fastmcp import FastMCP
 # Initialize the MCP server
 mcp = FastMCP(
     name="Andrew Bolster Resources",
+    version=_SERVER_VERSION,
     instructions="""
         This server provides curated resources and links about Andrew Bolster,
         including his professional background, research interests, community involvement,
