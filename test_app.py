@@ -286,6 +286,18 @@ END:VCALENDAR"""
 
     @pytest.mark.asyncio
     @patch("app.requests.get")
+    async def test_check_availability_request_exception(self, mock_get):
+        """Test availability check with requests-level network error"""
+        mock_get.side_effect = requests.RequestException("Connection refused")
+
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "check_availability", {"start_date": "2024-12-01", "days_ahead": 3}
+            )
+            assert "Error fetching calendar data" in result.data
+
+    @pytest.mark.asyncio
+    @patch("app.requests.get")
     async def test_check_availability_network_error(self, mock_get):
         """Test availability check with network error"""
         mock_get.side_effect = Exception("Network error")
@@ -509,6 +521,36 @@ class TestRSSFeedTool:
             # Should handle parse error gracefully
             assert isinstance(result.data, str)
             assert "Error" in result.data
+
+    @pytest.mark.asyncio
+    @patch("app.requests.get")
+    async def test_get_recent_blog_posts_no_channel(self, mock_get):
+        """Test RSS feed with no channel element"""
+        mock_response = MagicMock()
+        mock_response.content = b"""<?xml version="1.0"?><rss version="2.0"></rss>"""
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("get_recent_blog_posts", {})
+            assert "Could not find RSS channel" in result.data
+
+    @pytest.mark.asyncio
+    @patch("app.requests.get")
+    async def test_get_recent_blog_posts_long_description(self, mock_get):
+        """Test RSS feed truncates descriptions over 500 characters"""
+        mock_response = MagicMock()
+        long_desc = "x" * 600
+        mock_response.content = f"""<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <item><title>T</title><link>http://x.com</link><description>{long_desc}</description></item>
+</channel></rss>""".encode()
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("get_recent_blog_posts", {"limit": 1})
+            assert "..." in result.data
 
     @pytest.mark.asyncio
     @patch("app.requests.get")

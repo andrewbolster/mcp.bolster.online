@@ -1,0 +1,243 @@
+name: Automated Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type (patch, minor, major)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+        - auto
+        - patch
+        - minor
+        - major
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  analyze-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.analyze.outputs.should_release }}
+      version_bump: ${{ steps.analyze.outputs.version_bump }}
+      changelog: ${{ steps.analyze.outputs.changelog }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Analyze changes and determine version bump
+      id: analyze
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { execSync } = require('child_process');
+
+          let lastTag;
+          try {
+            lastTag = execSync('git describe --tags --abbrev=0', { encoding: 'utf-8' }).trim();
+          } catch (e) {
+            lastTag = 'v0.0.0';
+          }
+
+          console.log(`Last tag: ${lastTag}`);
+
+          const commits = execSync(`git log ${lastTag}..HEAD --pretty=format:"%s"`, { encoding: 'utf-8' })
+            .split('\n')
+            .filter(line => line.trim());
+
+          console.log(`Commits since ${lastTag}:`, commits);
+
+          const skipPatterns = [
+            /^docs?(\(.*\))?:/,
+            /^ci(\(.*\))?:/,
+            /^chore(\(.*\))?:/,
+            /^style(\(.*\))?:/,
+            /^test(\(.*\))?:/,
+            /Merge pull request/,
+            /Update.*dependabot/i
+          ];
+
+          const releaseCommits = commits.filter(commit =>
+            !skipPatterns.some(pattern => pattern.test(commit))
+          );
+
+          // Manual override from workflow_dispatch
+          if (context.eventName === 'workflow_dispatch' && context.payload.inputs?.version_bump !== 'auto') {
+            core.setOutput('should_release', 'true');
+            core.setOutput('version_bump', context.payload.inputs.version_bump);
+            core.setOutput('changelog', 'Manual release triggered');
+            return;
+          }
+
+          // Check for version:* label on the merged PR
+          let labelOverride = null;
+          try {
+            const headSha = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
+            const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: headSha,
+            });
+            for (const pr of prs.data) {
+              const versionLabel = pr.labels.map(l => l.name).find(n => n.startsWith('version:'));
+              if (versionLabel) {
+                labelOverride = versionLabel.replace('version:', '');
+                console.log(`PR #${pr.number} label override: ${labelOverride}`);
+                break;
+              }
+            }
+          } catch (e) {
+            console.log(`Could not check PR labels: ${e.message}`);
+          }
+
+          if (labelOverride === 'skip') {
+            console.log('PR label version:skip - skipping release');
+            core.setOutput('should_release', 'false');
+            return;
+          }
+
+          if (releaseCommits.length === 0 && !labelOverride) {
+            console.log('No release-worthy changes found');
+            core.setOutput('should_release', 'false');
+            return;
+          }
+
+          let versionBump = labelOverride || 'patch';
+
+          if (!labelOverride) {
+            let hasBreaking = false;
+            let hasFeatures = false;
+
+            for (const commit of releaseCommits) {
+              if (commit.includes('BREAKING CHANGE') || commit.includes('!:')) {
+                hasBreaking = true;
+                break;
+              }
+              if (commit.match(/^feat(\(.*\))?:/)) {
+                hasFeatures = true;
+              }
+            }
+
+            if (hasBreaking) {
+              versionBump = 'major';
+            } else if (hasFeatures) {
+              versionBump = 'minor';
+            }
+          }
+
+          // Major versions require explicit workflow_dispatch
+          if (versionBump === 'major') {
+            console.log('Breaking change detected - major version requires manual release via workflow_dispatch');
+            core.setOutput('should_release', 'false');
+            return;
+          }
+
+          const changelog = releaseCommits
+            .map(commit => `- ${commit}`)
+            .join('\n');
+
+          core.setOutput('should_release', 'true');
+          core.setOutput('version_bump', versionBump);
+          core.setOutput('changelog', changelog);
+
+          console.log(`Release decision: ${versionBump} version bump`);
+
+  open-release-pr:
+    needs: analyze-changes
+    if: needs.analyze-changes.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Python and uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      run: uv sync --dev
+
+    - name: Configure git
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Bump version
+      run: |
+        uv run bump-my-version bump ${{ needs.analyze-changes.outputs.version_bump }}
+        NEW_VERSION=$(uv run bump-my-version show current_version)
+        echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+
+    - name: Generate changelog entry
+      env:
+        CHANGELOG_ENTRY: ${{ needs.analyze-changes.outputs.changelog }}
+      run: |
+        python3 - <<'PYEOF'
+        import os
+        from datetime import date
+        from pathlib import Path
+
+        version = os.environ["NEW_VERSION"]
+        entry_text = os.environ["CHANGELOG_ENTRY"]
+        entry = f"\n## [{version}] - {date.today()}\n\n{entry_text}\n"
+
+        path = Path("CHANGELOG.md")
+        content = path.read_text()
+        lines = content.split("\n")
+        for i, line in enumerate(lines):
+            if line.startswith("# "):
+                lines.insert(i + 1, entry)
+                break
+        path.write_text("\n".join(lines))
+        PYEOF
+
+    - name: Push version bump branch, tag, and open PR
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CHANGELOG_ENTRY: ${{ needs.analyze-changes.outputs.changelog }}
+      run: |
+        BRANCH="release/v${NEW_VERSION}"
+
+        if git ls-remote --exit-code origin "refs/tags/v${NEW_VERSION}" 2>/dev/null; then
+          echo "Tag v${NEW_VERSION} already exists on remote — checking for open PR"
+          EXISTING_PR=$(gh pr list --head "$BRANCH" --base main --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #${EXISTING_PR} already open for ${BRANCH} — nothing to do"
+            exit 0
+          fi
+          gh pr create \
+            --title "chore: bump version to ${NEW_VERSION}" \
+            --body "Automated version bump to ${NEW_VERSION} (retry — tag was already pushed in a previous run)." \
+            --label "version:skip" \
+            --base main \
+            --head "$BRANCH"
+          exit 0
+        fi
+
+        git checkout -b "$BRANCH"
+        git add .
+        git commit -m "chore: bump version to ${NEW_VERSION}"
+        git tag "v${NEW_VERSION}"
+        git push origin "$BRANCH"
+        git push origin "v${NEW_VERSION}"
+
+        printf 'Automated version bump to %s.\n\n## Changes in this release\n\n%s\n\n---\n*This PR was automatically created by the release workflow.*\n' \
+          "${NEW_VERSION}" "${CHANGELOG_ENTRY}" \
+          > /tmp/pr-body.md
+
+        gh pr create \
+          --title "chore: bump version to ${NEW_VERSION}" \
+          --body-file /tmp/pr-body.md \
+          --label "version:skip" \
+          --base main \
+          --head "$BRANCH"
