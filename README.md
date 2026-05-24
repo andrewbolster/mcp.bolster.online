@@ -6,22 +6,22 @@
 [![🤖 AI Content Review](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/ai-content-review.yml/badge.svg?branch=main)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/ai-content-review.yml)
 [![codecov](https://codecov.io/gh/andrewbolster/mcp.bolster.online/branch/main/graph/badge.svg)](https://codecov.io/gh/andrewbolster/mcp.bolster.online)
 
-[![Python](https://img.shields.io/badge/Python-3.11%20|%203.12%20|%203.13-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![FastMCP](https://img.shields.io/badge/Framework-FastMCP-purple?logo=lightning&logoColor=white)](https://gofastmcp.com/)
-[![Ruff](https://img.shields.io/badge/Code%20Quality-Ruff-red?logo=ruff&logoColor=white)](https://github.com/astral-sh/ruff)
-[![uv](https://img.shields.io/badge/Package%20Manager-uv-green?logo=python&logoColor=white)](https://github.com/astral-sh/uv)
-[![License](https://img.shields.io/badge/License-GPL--3.0-red?logo=gnu&logoColor=white)](LICENSE)
+![Python](https://img.shields.io/pypi/pyversions/mcp-bolster-online?style=for-the-badge)
+[![FastMCP](https://img.shields.io/badge/Framework-FastMCP-purple?logo=lightning&logoColor=white&style=for-the-badge)](https://gofastmcp.com/)
+[![Ruff](https://img.shields.io/badge/Code%20Quality-Ruff-red?logo=ruff&logoColor=white&style=for-the-badge)](https://github.com/astral-sh/ruff)
+[![uv](https://img.shields.io/badge/Package%20Manager-uv-green?logo=python&logoColor=white&style=for-the-badge)](https://github.com/astral-sh/uv)
+[![License](https://img.shields.io/badge/License-GPL--3.0-red?logo=gnu&logoColor=white&style=for-the-badge)](LICENSE)
 
-[![Test Coverage](https://img.shields.io/badge/Coverage-92%25-brightgreen?logo=codecov&logoColor=white)](https://codecov.io/gh/andrewbolster/mcp.bolster.online)
-[![Multi-Platform](https://img.shields.io/badge/Ubuntu-Latest%20%7C%2022.04-orange?logo=ubuntu&logoColor=white)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
-[![Pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://pre-commit.com/)
-[![Deployment](https://img.shields.io/badge/Deployment-Ready-success?logo=docker&logoColor=white)](https://github.com/andrewbolster/mcp.bolster.online/tree/main/deployment)
+[![codecov](https://img.shields.io/codecov/c/github/andrewbolster/mcp.bolster.online?style=for-the-badge&logo=codecov)](https://codecov.io/gh/andrewbolster/mcp.bolster.online)
+[![Multi-Platform](https://img.shields.io/badge/Ubuntu-Latest%20%7C%2022.04-orange?logo=ubuntu&logoColor=white&style=for-the-badge)](https://github.com/andrewbolster/mcp.bolster.online/actions/workflows/test-and-coverage.yml)
+[![Pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white&style=for-the-badge)](https://pre-commit.com/)
+[![Deployment](https://img.shields.io/badge/Deployment-Ready-success?logo=docker&logoColor=white&style=for-the-badge)](https://github.com/andrewbolster/mcp.bolster.online/tree/main/deployment)
 
 An MCP (Model Context Protocol) server providing curated resources and tools about Andrew Bolster, including professional background, research interests, community involvement, and contact/availability tools.
 
 ## 🚀 Features
 
-### MCP Resources (7 available)
+### MCP Resources
 - **Personal Website** - Main website and technical blog
 - **Professional Profile** - Current roles and expertise
 - **Farset Labs** - Belfast hackerspace co-founder information
@@ -30,9 +30,10 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 - **Community Involvement** - Organizational roles and activities
 - **Technical Blog** - Writing and thought leadership
 
-### MCP Tools (2 available)
+### MCP Tools
 - **Contact Tool** - Send professional inquiries (placeholder implementation)
 - **Availability Tool** - Check calendar availability via public iCal feed
+- **Blog Posts Tool** - Fetch recent posts from RSS feed
 
 ### Development Features
 - **FastMCP Framework** - Modern MCP server development

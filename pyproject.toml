@@ -1,15 +1,23 @@
 [project]
 name = "mcp-bolster-online"
 version = "0.1.0"
-description = "Add your description here"
+description = "MCP server providing curated resources and tools about Andrew Bolster — professional background, research interests, community involvement, and availability tools."
 readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "GPL-3.0" }
+authors = [{ name = "Andrew Bolster", email = "andrew@bolster.online" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+]
 dependencies = [
     "fastmcp>=2.11.1",
-    "pre-commit>=4.2.0",
-    "pytest>=8.4.1",
-    "pytest-asyncio>=0.24.0",
-    "pytest-cov>=6.0.0",
     "requests>=2.31.0",
 ]
 
@@ -21,6 +29,10 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.11.0",
     "types-requests>=2.31.0",
+    "pre-commit>=4.2.0",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
 ]
 
 [tool.ruff]

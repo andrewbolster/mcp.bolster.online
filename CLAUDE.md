@@ -28,7 +28,7 @@ This is a fully-featured MCP (Model Context Protocol) server providing curated r
 
 ## Key Features
 
-### MCP Server Resources (app.py) - 7 Available
+### MCP Server Resources (app.py)
 - `resource://andrew-bolster/personal-website` - Main website information
 - `resource://andrew-bolster/professional-profile` - Current roles and background
 - `resource://andrew-bolster/farset-labs` - Belfast hackerspace information
@@ -37,9 +37,12 @@ This is a fully-featured MCP (Model Context Protocol) server providing curated r
 - `resource://andrew-bolster/community-involvement` - Organizational roles
 - `resource://andrew-bolster/technical-blog` - Blog information and topics
 
-### MCP Server Tools (app.py) - 2 Available
+### MCP Server Tools (app.py)
 - `send_contact_message(message, sender)` - Contact tool with email integration placeholder
 - `check_availability(start_date, days_ahead)` - Calendar availability via iCal feed parsing
+- `get_recent_blog_posts(limit)` - Fetch recent posts from RSS feed (max 10)
+
+> For the current tool list, read `app.py` — all `@mcp.tool()` decorated functions are tools.
 
 ## Development Commands
 
@@ -140,7 +143,8 @@ uv run pre-commit run --all-files # Manual run
 
 ## Important Files to Understand
 
-- **app.py**: Core MCP server with 7 resources + 2 tools, 92% test coverage
+- **app.py**: Core MCP server with 7 resources + 3 tools, 92%+ test coverage
+- **CHANGELOG.md**: Project change history
 - **test_app.py**: Comprehensive test suite using FastMCP in-memory patterns
 - **.github/workflows/ai-content-review.yml**: Cutting-edge AI automation
 - **.github/prompts/content-review.yml**: Professional AI content analysis prompt
