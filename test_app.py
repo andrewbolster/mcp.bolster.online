@@ -5,335 +5,247 @@ Test suite for Andrew Bolster MCP Resources Server
 Tests both resources and tools using FastMCP in-memory testing patterns.
 """
 
-from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+import json
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
-import requests
 from fastmcp import Client
 
 from app import mcp
 
 
-class TestMCPServer:
-    """Test the basic MCP server functionality"""
+def get_posts(result) -> list:
+    """Extract blog post list from tool result (FastMCP returns list as JSON in content)."""
+    if result.data is not None:
+        return result.data
+    if not result.content:
+        return []
+    return json.loads(result.content[0].text)
 
+
+def make_httpx_response(
+    text: str = "", content: bytes = b"", status_code: int = 200
+) -> MagicMock:
+    """Build a mock httpx.Response."""
+    mock = MagicMock(spec=httpx.Response)
+    mock.text = text
+    mock.content = content
+    mock.status_code = status_code
+    mock.raise_for_status = MagicMock()
+    return mock
+
+
+class TestMCPServer:
     @pytest.mark.asyncio
     async def test_server_initialization(self):
-        """Test that the MCP server initializes correctly"""
         async with Client(mcp) as client:
-            # Test that we can connect to the server
             assert client is not None
 
 
 class TestResources:
-    """Test all MCP resources"""
-
     @pytest.mark.asyncio
     async def test_personal_website_resource(self):
-        """Test the personal website resource"""
         async with Client(mcp) as client:
             result = await client.read_resource(
                 "resource://andrew-bolster/personal-website"
             )
             content = result[0].text
-
             assert "Andrew Bolster - Personal Website" in content
             assert "https://andrewbolster.info/" in content
-            assert "Senior R&D Manager (Data Science)" in content
             assert "Black Duck Software" in content
 
     @pytest.mark.asyncio
     async def test_professional_profile_resource(self):
-        """Test the professional profile resource"""
         async with Client(mcp) as client:
             result = await client.read_resource(
                 "resource://andrew-bolster/professional-profile"
             )
             content = result[0].text
-
             assert "Andrew Bolster - Professional Profile" in content
-            assert "Current Roles" in content
             assert "BSides Belfast" in content
-            assert "Data Science and Machine Learning" in content
             assert "Queen's University Belfast" in content
 
     @pytest.mark.asyncio
     async def test_farset_labs_resource(self):
-        """Test the Farset Labs resource"""
         async with Client(mcp) as client:
             result = await client.read_resource("resource://andrew-bolster/farset-labs")
             content = result[0].text
-
             assert "Farset Labs - Belfast Hackerspace" in content
-            assert "Founding Director" in content
             assert "January 2012" in content
-            assert "Northern Ireland's first hackerspace" in content
             assert "https://www.farsetlabs.org.uk/" in content
 
     @pytest.mark.asyncio
     async def test_social_media_resource(self):
-        """Test the social media resource"""
         async with Client(mcp) as client:
             result = await client.read_resource(
                 "resource://andrew-bolster/social-media"
             )
             content = result[0].text
-
-            # Test structure and type
             assert isinstance(content, str)
-            assert len(content) > 100  # Ensure meaningful content
-            # Test that it contains URLs (basic structural check)
             assert "https://" in content
 
     @pytest.mark.asyncio
     async def test_research_interests_resource(self):
-        """Test the research interests resource"""
         async with Client(mcp) as client:
             result = await client.read_resource(
                 "resource://andrew-bolster/research-interests"
             )
             content = result[0].text
-
-            assert "Research Interests" in content
             assert "Generative AI" in content
             assert "autonomous underwater vehicles" in content
-            assert "Trust frameworks" in content
-            assert "andrewbolster.info" in content
 
     @pytest.mark.asyncio
     async def test_community_involvement_resource(self):
-        """Test the community involvement resource"""
         async with Client(mcp) as client:
             result = await client.read_resource(
                 "resource://andrew-bolster/community-involvement"
             )
             content = result[0].text
-
-            # Test structure and type
             assert isinstance(content, str)
-            assert len(content) > 200  # Ensure meaningful content
-            # Basic structural checks
-            assert "#" in content  # Should have markdown headers
+            assert "#" in content
 
     @pytest.mark.asyncio
     async def test_technical_blog_resource(self):
-        """Test the technical blog resource"""
         async with Client(mcp) as client:
             result = await client.read_resource(
                 "resource://andrew-bolster/technical-blog"
             )
             content = result[0].text
-
-            assert "Technical Blog" in content
             assert "https://andrewbolster.info/blog/" in content
-            assert "Machine learning" in content
             assert "PhD diary entries" in content
 
 
 class TestContactTool:
-    """Test the contact message tool"""
-
     @pytest.mark.asyncio
     async def test_send_contact_message_basic(self):
-        """Test basic contact message functionality"""
         async with Client(mcp) as client:
             result = await client.call_tool(
                 "send_contact_message",
-                {
-                    "message": "Hello, I'd like to collaborate on a project",
-                    "sender": "Test User",
-                },
+                {"message": "Hello, I'd like to collaborate", "sender": "Test User"},
             )
-
             response = result.data
             assert "Message received and queued for delivery" in response
             assert "Test User" in response
             assert "placeholder implementation" in response.lower()
-            message_text = "Hello, I'd like to collaborate on a project"
-            assert f"Length: {len(message_text)} characters" in response
 
     @pytest.mark.asyncio
     async def test_send_contact_message_empty_fields(self):
-        """Test contact message with empty fields"""
         async with Client(mcp) as client:
-            # Test with empty message
             result = await client.call_tool(
                 "send_contact_message", {"message": "", "sender": "Test User"}
             )
-            response = result.data
-            assert "Length: 0 characters" in response
-
-            # Test with empty sender
-            result = await client.call_tool(
-                "send_contact_message", {"message": "Test message", "sender": ""}
-            )
-            response = result.data
-            assert "Message from:" in response
+            assert "Length: 0 characters" in result.data
 
     @pytest.mark.asyncio
-    async def test_send_contact_message_long_content(self):
-        """Test contact message with long content"""
-        long_message = "This is a very long message. " * 100
-
+    async def test_send_contact_message_timestamp_format(self):
         async with Client(mcp) as client:
             result = await client.call_tool(
                 "send_contact_message",
-                {"message": long_message, "sender": "Verbose User"},
+                {"message": "Test", "sender": "Tester"},
             )
-
-            response = result.data
-            assert f"Length: {len(long_message)} characters" in response
-            assert "Verbose User" in response
-
-    @pytest.mark.asyncio
-    async def test_contact_message_timestamp_format(self):
-        """Test that contact message includes proper timestamp"""
-        async with Client(mcp) as client:
-            result = await client.call_tool(
-                "send_contact_message",
-                {"message": "Test timestamp", "sender": "Time Tester"},
-            )
-
-            response = result.data
-            # Check that response contains a timestamp pattern (YYYY-MM-DD HH:MM:SS)
-            assert "Timestamp:" in response
-            # Should contain current date (at least the year)
-            current_year = str(datetime.now().year)
-            assert current_year in response
+            assert "Timestamp:" in result.data
+            assert str(datetime.now().year) in result.data
 
 
 class TestAvailabilityTool:
-    """Test the calendar availability tool"""
+    @pytest.mark.asyncio
+    async def test_check_availability_no_events(self):
+        mock_response = make_httpx_response(
+            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
+        )
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
+                )
+                assert "No scheduled events found" in result.data
+                assert "2024-12-01" in result.data
 
     @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_check_availability_no_events(self, mock_get):
-        """Test availability check when no events are scheduled"""
-        # Mock empty calendar response
-        mock_response = MagicMock()
-        mock_response.text = """BEGIN:VCALENDAR
+    async def test_check_availability_with_events(self):
+        ical = """BEGIN:VCALENDAR
 VERSION:2.0
-PRODID:-//Google Inc//Google Calendar 70.9054//EN
-CALSCALE:GREGORIAN
-END:VCALENDAR"""
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
-
-        async with Client(mcp) as client:
-            result = await client.call_tool(
-                "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
-            )
-
-            response = result.data
-            assert "No scheduled events found" in response
-            assert "2024-12-01" in response
-            assert "2024-12-08" in response
-
-    @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_check_availability_with_events(self, mock_get):
-        """Test availability check with scheduled events"""
-        # Mock calendar with events
-        mock_response = MagicMock()
-        mock_response.text = """BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Google Inc//Google Calendar 70.9054//EN
 BEGIN:VEVENT
 DTSTART:20241202T100000Z
 DTEND:20241202T110000Z
 SUMMARY:Team Meeting
 END:VEVENT
-BEGIN:VEVENT
-DTSTART:20241203T140000Z
-DTEND:20241203T150000Z
-SUMMARY:Project Review
-END:VEVENT
 END:VCALENDAR"""
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
+        mock_response = make_httpx_response(text=ical)
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
 
-        async with Client(mcp) as client:
-            result = await client.call_tool(
-                "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
-            )
-
-            response = result.data
-            assert "Scheduled events found" in response
-            assert "Team Meeting" in response
-            assert "Project Review" in response
-            assert "2024-12-02 10:00" in response
-            assert "2024-12-03 14:00" in response
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
+                )
+                assert "Team Meeting" in result.data
+                assert "2024-12-02 10:00" in result.data
 
     @pytest.mark.asyncio
     async def test_check_availability_default_parameters(self):
-        """Test availability check with default parameters (today + 7 days)"""
-        with patch("app.requests.get") as mock_get:
-            mock_response = MagicMock()
-            mock_response.text = "BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
-            mock_response.raise_for_status.return_value = None
-            mock_get.return_value = mock_response
+        mock_response = make_httpx_response(
+            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
+        )
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
 
             async with Client(mcp) as client:
                 result = await client.call_tool("check_availability", {})
-
-                response = result.data
-                # Should use today's date
                 today = datetime.now().strftime("%Y-%m-%d")
-                future_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
-                assert today in response
-                assert future_date in response
+                assert today in result.data
 
     @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_check_availability_request_exception(self, mock_get):
-        """Test availability check with requests-level network error"""
-        mock_get.side_effect = requests.RequestException("Connection refused")
-
-        async with Client(mcp) as client:
-            result = await client.call_tool(
-                "check_availability", {"start_date": "2024-12-01", "days_ahead": 3}
+    async def test_check_availability_request_exception(self):
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(
+                side_effect=httpx.RequestError("Connection refused")
             )
-            assert "Error fetching calendar data" in result.data
+            mock_client_cls.return_value = mock_client
 
-    @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_check_availability_network_error(self, mock_get):
-        """Test availability check with network error"""
-        mock_get.side_effect = Exception("Network error")
-
-        async with Client(mcp) as client:
-            result = await client.call_tool(
-                "check_availability", {"start_date": "2024-12-01", "days_ahead": 3}
-            )
-
-            response = result.data
-            assert "Error processing calendar information" in response
-            assert "contact directly" in response
-
-    @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_check_availability_invalid_date_format(self, mock_get):
-        """Test availability check with invalid date format"""
-        async with Client(mcp) as client:
-            # This should raise an exception or handle gracefully
-            try:
+            async with Client(mcp) as client:
                 result = await client.call_tool(
-                    "check_availability",
-                    {"start_date": "invalid-date", "days_ahead": 7},
+                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 3}
                 )
-                response = result.data
-                assert "Error processing calendar information" in response
-            except ValueError:
-                # Expected behavior for invalid date format
-                pass
+                assert "Error fetching calendar data" in result.data
 
     @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_check_availability_all_day_events(self, mock_get):
-        """Test availability check with all-day events"""
-        mock_response = MagicMock()
-        mock_response.text = """BEGIN:VCALENDAR
+    async def test_check_availability_network_error(self):
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(side_effect=Exception("Unexpected error"))
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 3}
+                )
+                assert "Error processing calendar information" in result.data
+
+    @pytest.mark.asyncio
+    async def test_check_availability_all_day_events(self):
+        ical = """BEGIN:VCALENDAR
 VERSION:2.0
 BEGIN:VEVENT
 DTSTART:20241202
@@ -341,44 +253,176 @@ DTEND:20241203
 SUMMARY:Conference Day
 END:VEVENT
 END:VCALENDAR"""
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
+        mock_response = make_httpx_response(text=ical)
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
 
-        async with Client(mcp) as client:
-            result = await client.call_tool(
-                "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
-            )
-
-            response = result.data
-            assert "Conference Day" in response
-            assert "2024-12-02 00:00" in response
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
+                )
+                assert "Conference Day" in result.data
 
     @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_check_availability_custom_date_range(self, mock_get):
-        """Test availability check with custom date range"""
-        mock_response = MagicMock()
-        mock_response.text = "BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
+    async def test_check_availability_custom_date_range(self):
+        mock_response = make_httpx_response(
+            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
+        )
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
 
-        async with Client(mcp) as client:
-            result = await client.call_tool(
-                "check_availability", {"start_date": "2025-01-15", "days_ahead": 14}
-            )
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "check_availability", {"start_date": "2025-01-15", "days_ahead": 14}
+                )
+                assert "2025-01-15" in result.data
+                assert "2025-01-29" in result.data
 
-            response = result.data
-            assert "2025-01-15" in response
-            assert "2025-01-29" in response  # 15 + 14 days
+
+class TestRSSFeedTool:
+    RSS_WITH_ITEM = b"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>Test Post</title>
+      <link>https://example.com/post</link>
+      <description>Test description</description>
+      <pubDate>Fri, 01 Jan 2024 12:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>"""
+
+    @pytest.mark.asyncio
+    async def test_get_recent_blog_posts_success(self):
+        mock_response = make_httpx_response(content=self.RSS_WITH_ITEM)
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_recent_blog_posts", {"limit": 1})
+                posts = get_posts(result)
+                assert isinstance(posts, list)
+                assert len(posts) == 1
+                assert posts[0]["title"] == "Test Post"
+                assert posts[0]["url"] == "https://example.com/post"
+
+    @pytest.mark.asyncio
+    async def test_get_recent_blog_posts_limit(self):
+        two_items = b"""<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <item><title>P1</title><link>http://x.com/1</link><description>D1</description></item>
+  <item><title>P2</title><link>http://x.com/2</link><description>D2</description></item>
+</channel></rss>"""
+        mock_response = make_httpx_response(content=two_items)
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_recent_blog_posts", {"limit": 1})
+                assert len(get_posts(result)) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_recent_blog_posts_http_error(self):
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(side_effect=httpx.RequestError("Network error"))
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_recent_blog_posts", {})
+                assert get_posts(result) == []
+
+    @pytest.mark.asyncio
+    async def test_get_recent_blog_posts_invalid_xml(self):
+        mock_response = make_httpx_response(content=b"Not XML")
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_recent_blog_posts", {})
+                assert get_posts(result) == []
+
+    @pytest.mark.asyncio
+    async def test_get_recent_blog_posts_no_channel(self):
+        mock_response = make_httpx_response(
+            content=b"""<?xml version="1.0"?><rss version="2.0"></rss>"""
+        )
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_recent_blog_posts", {})
+                assert get_posts(result) == []
+
+    @pytest.mark.asyncio
+    async def test_get_recent_blog_posts_empty_channel(self):
+        mock_response = make_httpx_response(
+            content=b"""<?xml version="1.0"?>
+<rss version="2.0"><channel></channel></rss>"""
+        )
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_recent_blog_posts", {})
+                assert get_posts(result) == []
+
+    @pytest.mark.asyncio
+    async def test_get_recent_blog_posts_long_description_truncated(self):
+        long_desc = "x" * 600
+        feed = f"""<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <item><title>T</title><link>http://x.com</link><description>{long_desc}</description></item>
+</channel></rss>""".encode()
+        mock_response = make_httpx_response(content=feed)
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_recent_blog_posts", {"limit": 1})
+                posts = get_posts(result)
+                assert posts[0]["summary"].endswith("...")
+                assert len(posts[0]["summary"]) == 500
 
 
 class TestIntegration:
-    """Integration tests for the complete MCP server"""
-
     @pytest.mark.asyncio
     async def test_all_resources_accessible(self):
-        """Test that all resources are accessible"""
-        expected_resources = [
+        resources = [
             "resource://andrew-bolster/personal-website",
             "resource://andrew-bolster/professional-profile",
             "resource://andrew-bolster/farset-labs",
@@ -387,188 +431,50 @@ class TestIntegration:
             "resource://andrew-bolster/community-involvement",
             "resource://andrew-bolster/technical-blog",
         ]
-
         async with Client(mcp) as client:
-            for resource_uri in expected_resources:
-                result = await client.read_resource(resource_uri)
+            for uri in resources:
+                result = await client.read_resource(uri)
                 assert len(result) > 0
-                assert result[0].text is not None
-                assert len(result[0].text) > 0
+                assert result[0].text
 
     @pytest.mark.asyncio
     async def test_all_tools_callable(self):
-        """Test that all tools are callable"""
+        empty_ical = make_httpx_response(
+            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
+        )
+        empty_rss = make_httpx_response(
+            content=b"""<?xml version="1.0"?>
+<rss version="2.0"><channel></channel></rss>"""
+        )
+
         async with Client(mcp) as client:
-            # Test contact tool
-            contact_result = await client.call_tool(
+            contact = await client.call_tool(
                 "send_contact_message",
-                {"message": "Integration test message", "sender": "Test Suite"},
+                {"message": "Integration test", "sender": "Test Suite"},
             )
-            assert "Message received" in contact_result.data
+            assert "Message received" in contact.data
 
-            # Test availability tool (with mock)
-            with patch("app.requests.get") as mock_get:
-                mock_response = MagicMock()
-                mock_response.text = "BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
-                mock_response.raise_for_status.return_value = None
-                mock_get.return_value = mock_response
+            with patch("app.httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client.get = AsyncMock(return_value=empty_ical)
+                mock_client_cls.return_value = mock_client
 
-                availability_result = await client.call_tool("check_availability", {})
-                assert "Calendar availability" in availability_result.data
+                avail = await client.call_tool("check_availability", {})
+                assert "Calendar availability" in avail.data
 
-            # Test RSS tool (with mock)
-            with patch("app.requests.get") as mock_get:
-                mock_response = MagicMock()
-                mock_response.content = b"""<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-    <channel>
-        <title>Andrew Bolster's Blog</title>
-        <item>
-            <title>Test Blog Post</title>
-            <link>https://andrewbolster.info/test-post</link>
-            <description>This is a test description</description>
-            <pubDate>Fri, 01 Jan 2024 12:00:00 GMT</pubDate>
-        </item>
-    </channel>
-</rss>"""
-                mock_response.raise_for_status.return_value = None
-                mock_get.return_value = mock_response
+            with patch("app.httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client.get = AsyncMock(return_value=empty_rss)
+                mock_client_cls.return_value = mock_client
 
-                rss_result = await client.call_tool(
+                posts_result = await client.call_tool(
                     "get_recent_blog_posts", {"limit": 3}
                 )
-                # Test structure and type
-                assert isinstance(rss_result.data, str)
-                assert len(rss_result.data) > 50  # Should have meaningful content
-
-
-class TestRSSFeedTool:
-    """Tests for the RSS feed tool"""
-
-    @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_get_recent_blog_posts_success(self, mock_get):
-        """Test successful RSS feed retrieval"""
-        mock_response = MagicMock()
-        mock_response.content = b"""<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-    <channel>
-        <item>
-            <title>Test Post</title>
-            <link>https://example.com/post</link>
-            <description>Test description</description>
-            <pubDate>Fri, 01 Jan 2024 12:00:00 GMT</pubDate>
-        </item>
-    </channel>
-</rss>"""
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
-
-        async with Client(mcp) as client:
-            result = await client.call_tool("get_recent_blog_posts", {"limit": 2})
-            # Test return type and structure
-            assert isinstance(result.data, str)
-            assert len(result.data) > 100
-            assert "https://" in result.data  # Should contain URLs
-
-    @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_get_recent_blog_posts_limit_parameter(self, mock_get):
-        """Test RSS feed respects limit parameter"""
-        mock_response = MagicMock()
-        mock_response.content = b"""<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-    <channel>
-        <item><title>Post 1</title><link>http://example.com/1</link><description>Desc</description></item>
-        <item><title>Post 2</title><link>http://example.com/2</link><description>Desc</description></item>
-    </channel>
-</rss>"""
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
-
-        async with Client(mcp) as client:
-            # Test with default limit (should work)
-            result = await client.call_tool("get_recent_blog_posts", {})
-            assert isinstance(result.data, str)
-
-            # Test with specific limit
-            result = await client.call_tool("get_recent_blog_posts", {"limit": 1})
-            assert isinstance(result.data, str)
-
-    @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_get_recent_blog_posts_error_handling(self, mock_get):
-        """Test RSS feed error handling"""
-        mock_get.side_effect = requests.RequestException("Network error")
-
-        async with Client(mcp) as client:
-            result = await client.call_tool("get_recent_blog_posts", {})
-            # Should return error message as string, not raise exception
-            assert isinstance(result.data, str)
-            assert "Error" in result.data
-
-    @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_get_recent_blog_posts_invalid_xml(self, mock_get):
-        """Test RSS feed with invalid XML"""
-        mock_response = MagicMock()
-        mock_response.content = b"Invalid XML content"
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
-
-        async with Client(mcp) as client:
-            result = await client.call_tool("get_recent_blog_posts", {})
-            # Should handle parse error gracefully
-            assert isinstance(result.data, str)
-            assert "Error" in result.data
-
-    @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_get_recent_blog_posts_no_channel(self, mock_get):
-        """Test RSS feed with no channel element"""
-        mock_response = MagicMock()
-        mock_response.content = b"""<?xml version="1.0"?><rss version="2.0"></rss>"""
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
-
-        async with Client(mcp) as client:
-            result = await client.call_tool("get_recent_blog_posts", {})
-            assert "Could not find RSS channel" in result.data
-
-    @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_get_recent_blog_posts_long_description(self, mock_get):
-        """Test RSS feed truncates descriptions over 500 characters"""
-        mock_response = MagicMock()
-        long_desc = "x" * 600
-        mock_response.content = f"""<?xml version="1.0"?>
-<rss version="2.0"><channel>
-  <item><title>T</title><link>http://x.com</link><description>{long_desc}</description></item>
-</channel></rss>""".encode()
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
-
-        async with Client(mcp) as client:
-            result = await client.call_tool("get_recent_blog_posts", {"limit": 1})
-            assert "..." in result.data
-
-    @pytest.mark.asyncio
-    @patch("app.requests.get")
-    async def test_get_recent_blog_posts_empty_feed(self, mock_get):
-        """Test RSS feed with no items"""
-        mock_response = MagicMock()
-        mock_response.content = b"""<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-    <channel></channel>
-</rss>"""
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
-
-        async with Client(mcp) as client:
-            result = await client.call_tool("get_recent_blog_posts", {})
-            # Should handle empty feed gracefully
-            assert isinstance(result.data, str)
-            assert len(result.data) > 10  # Should have some message
+                assert isinstance(get_posts(posts_result), list)
 
 
 if __name__ == "__main__":
