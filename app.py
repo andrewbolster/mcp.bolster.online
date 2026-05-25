@@ -455,5 +455,17 @@ async def get_recent_blog_posts(
         return []
 
 
+try:
+    from bolster.cli import cli as _bolster_cli
+
+    from click_mcp import register_click_commands
+
+    register_click_commands(
+        mcp, _bolster_cli, prefix="bolster", exclude={"list-sources"}
+    )
+except ImportError:
+    pass
+
+
 if __name__ == "__main__":
     mcp.run()
