@@ -9,10 +9,11 @@ a Northern Ireland-based technology researcher, data scientist, and community bu
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
-import requests
-from fastmcp import FastMCP
+import httpx
+from fastmcp import Context, FastMCP
+from fastmcp.tools.tool import ToolAnnotations
 
 # Initialize the MCP server
 mcp = FastMCP(
@@ -251,26 +252,17 @@ The blog serves as both a technical resource and a window into Andrew's thinking
 """
 
 
-@mcp.tool()
-def send_contact_message(message: str, sender: str) -> str:
-    """
-    Send a message to Andrew Bolster for professional inquiries or collaboration requests.
-
-    Args:
-        message: The message content to send to Andrew
-        sender: Name or identifier of the person sending the message
-
-    Returns:
-        Confirmation message about the contact attempt
-    """
-    # Placeholder implementation - will be replaced with actual email integration
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))
+async def send_contact_message(
+    message: Annotated[str, "The message content to send to Andrew"],
+    sender: Annotated[str, "Name or identifier of the person sending the message"],
+    ctx: Context,
+) -> str:
+    """Send a message to Andrew Bolster for professional inquiries or collaboration requests."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    await ctx.info(f"Contact message received from {sender} ({len(message)} chars)")
 
-    # In a real implementation, this would log the message to a file or database
-    # contact_log = f"Contact from {sender} at {timestamp}: {message}"
-
-    # In a real implementation, you would integrate with email service here
-    # For now, just return a confirmation
+    # Placeholder — will be replaced with actual email integration
     return f"""Message received and queued for delivery to Andrew Bolster.
 
 Message from: {sender}
@@ -280,41 +272,37 @@ Length: {len(message)} characters
 Note: This is currently a placeholder implementation. The message has been logged but not yet delivered via email. Email integration will be added in a future update."""
 
 
-@mcp.tool()
-def check_availability(start_date: str | None = None, days_ahead: int = 7) -> str:
-    """
-    Check Andrew Bolster's calendar availability using his public iCal feed.
-
-    Args:
-        start_date: Start date in YYYY-MM-DD format (defaults to today)
-        days_ahead: Number of days to check ahead (default: 7)
-
-    Returns:
-        Availability summary for the specified period
-    """
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def check_availability(
+    ctx: Context,
+    start_date: Annotated[
+        str | None, "Start date in YYYY-MM-DD format (defaults to today)"
+    ] = None,
+    days_ahead: Annotated[int, "Number of days to check ahead"] = 7,
+) -> str:
+    """Check Andrew Bolster's calendar availability using his public iCal feed."""
     try:
-        # Parse start date or use today
         if start_date:
             start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         else:
             start_dt = datetime.now()
 
         end_dt = start_dt + timedelta(days=days_ahead)
+        await ctx.info(
+            f"Checking availability from {start_dt.date()} for {days_ahead} days"
+        )
 
-        # Fetch the iCal feed
         ical_url = "https://calendar.google.com/calendar/ical/andrew.bolster%40gmail.com/public/basic.ics"
-        response = requests.get(ical_url, timeout=10)
-        response.raise_for_status()
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(ical_url)
+            response.raise_for_status()
 
         ical_content = response.text
-
-        # Parse events from iCal content (basic parsing)
-        events = []
+        events: list[dict[str, Any]] = []
         current_event: dict[str, Any] = {}
 
         for line in ical_content.split("\n"):
             line = line.strip()
-
             if line == "BEGIN:VEVENT":
                 current_event = {}
             elif line == "END:VEVENT":
@@ -322,19 +310,16 @@ def check_availability(start_date: str | None = None, days_ahead: int = 7) -> st
                     events.append(current_event.copy())
                 current_event = {}
             elif line.startswith("DTSTART"):
-                # Parse date/time - handle both date and datetime formats
                 dt_match = re.search(r"DTSTART[^:]*:(\d{8}T?\d{0,6}Z?)", line)
                 if dt_match:
                     dt_str = dt_match.group(1)
                     try:
                         if "T" in dt_str:
-                            # DateTime format
                             if dt_str.endswith("Z"):
                                 dt = datetime.strptime(dt_str, "%Y%m%dT%H%M%SZ")
                             else:
                                 dt = datetime.strptime(dt_str, "%Y%m%dT%H%M%S")
                         else:
-                            # Date only format
                             dt = datetime.strptime(dt_str, "%Y%m%d")
                         current_event["start"] = dt
                     except ValueError:
@@ -355,26 +340,21 @@ def check_availability(start_date: str | None = None, days_ahead: int = 7) -> st
                     except ValueError:
                         pass
             elif line.startswith("SUMMARY"):
-                summary = line.split(":", 1)[1] if ":" in line else ""
-                current_event["summary"] = summary
+                current_event["summary"] = line.split(":", 1)[1] if ":" in line else ""
 
-        # Filter events within our date range
-        relevant_events = []
-        for event in events:
-            if "start" in event and "end" in event:
-                event_start = event["start"]
-                event_end = event["end"]
-                # Type guard to ensure they are datetime objects
-                if not isinstance(event_start, datetime) or not isinstance(
-                    event_end, datetime
-                ):
-                    continue
+        relevant_events = [
+            event
+            for event in events
+            if "start" in event
+            and "end" in event
+            and isinstance(event["start"], datetime)
+            and isinstance(event["end"], datetime)
+            and event["start"] <= end_dt
+            and event["end"] >= start_dt
+        ]
 
-                # Check if event overlaps with our time range
-                if event_start <= end_dt and event_end >= start_dt:
-                    relevant_events.append(event)
+        await ctx.info(f"Found {len(relevant_events)} events in range")
 
-        # Format the response
         if not relevant_events:
             return f"""Calendar availability for {start_dt.strftime("%Y-%m-%d")} to {end_dt.strftime("%Y-%m-%d")}:
 
@@ -382,62 +362,59 @@ def check_availability(start_date: str | None = None, days_ahead: int = 7) -> st
 
 Note: This shows only publicly visible calendar events. Private events and detailed scheduling should be confirmed directly."""
 
-        else:
-            event_list = []
-            for event in sorted(relevant_events, key=lambda x: x["start"]):
-                start_str = event["start"].strftime("%Y-%m-%d %H:%M")
-                end_str = event["end"].strftime("%Y-%m-%d %H:%M")
-                summary = event.get("summary", "Busy")
-                event_list.append(f"  📅 {start_str} - {end_str}: {summary}")
+        event_list = []
+        for event in sorted(relevant_events, key=lambda x: x["start"]):
+            start_str = event["start"].strftime("%Y-%m-%d %H:%M")
+            end_str = event["end"].strftime("%Y-%m-%d %H:%M")
+            summary = event.get("summary", "Busy")
+            event_list.append(f"  📅 {start_str} - {end_str}: {summary}")
 
-            return f"""Calendar availability for {start_dt.strftime("%Y-%m-%d")} to {end_dt.strftime("%Y-%m-%d")}:
+        return f"""Calendar availability for {start_dt.strftime("%Y-%m-%d")} to {end_dt.strftime("%Y-%m-%d")}:
 
 ⚠️  Scheduled events found:
 {chr(10).join(event_list)}
 
 Note: This shows only publicly visible calendar events. For detailed scheduling or to check additional availability, please use the contact tool to reach out directly."""
 
-    except requests.RequestException as e:
+    except httpx.HTTPError as e:
+        await ctx.warning(f"HTTP error fetching calendar: {e}")
         return f"Error fetching calendar data: {str(e)}. Please try again later or contact directly."
     except Exception as e:
+        await ctx.warning(f"Unexpected error in check_availability: {e}")
         return f"Error processing calendar information: {str(e)}. Please contact directly for availability."
 
 
-@mcp.tool()
-def get_recent_blog_posts(limit: int = 5) -> str:
-    """
-    Fetch recent blog posts from Andrew Bolster's RSS feed.
+class BlogPost(dict):  # type: ignore[type-arg]
+    """A single blog post with title, date, url, and summary fields."""
 
-    Args:
-        limit: Number of recent posts to return (default: 5, max: 10)
 
-    Returns:
-        Formatted list of recent blog posts with titles, dates, and truncated descriptions
-    """
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_recent_blog_posts(
+    ctx: Context,
+    limit: Annotated[int, "Number of recent posts to return (1-10)"] = 5,
+) -> list[BlogPost]:
+    """Fetch recent blog posts from Andrew Bolster's RSS feed."""
+    limit = min(max(1, limit), 10)
+    await ctx.info(f"Fetching {limit} recent blog posts from RSS feed")
+
     try:
-        # Limit the number of posts to prevent excessive responses
-        limit = min(max(1, limit), 10)
-
-        # Fetch the RSS feed
         rss_url = "https://feeds.feedburner.com/ofpenguinsandcoffee"
-        response = requests.get(rss_url, timeout=10)
-        response.raise_for_status()
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(rss_url)
+            response.raise_for_status()
 
-        # Parse the XML
         root = ET.fromstring(response.content)
-
-        # Find the channel and items
         channel = root.find("channel")
         if channel is None:
-            return "Error: Could not find RSS channel in feed."
+            await ctx.warning("RSS feed has no channel element")
+            return []
 
         items = channel.findall("item")
-
         if not items:
-            return "No blog posts found in the RSS feed."
+            await ctx.warning("RSS feed channel has no items")
+            return []
 
-        # Process the most recent items
-        recent_posts = []
+        posts: list[BlogPost] = []
         for item in items[:limit]:
             title_elem = item.find("title")
             link_elem = item.find("link")
@@ -449,46 +426,33 @@ def get_recent_blog_posts(limit: int = 5) -> str:
                 if title_elem is not None
                 else "No title"
             )
-            link = (link_elem.text or "No link") if link_elem is not None else "No link"
+            link = (link_elem.text or "") if link_elem is not None else ""
             description = (
-                (description_elem.text or "No description")
-                if description_elem is not None
-                else "No description"
+                (description_elem.text or "") if description_elem is not None else ""
             )
-            pub_date = (
-                (pub_date_elem.text or "No date")
-                if pub_date_elem is not None
-                else "No date"
-            )
+            pub_date = (pub_date_elem.text or "") if pub_date_elem is not None else ""
 
-            # Truncate description to 500 characters for LLM friendliness
+            # Strip HTML tags and truncate
+            description = re.sub(r"<[^>]+>", "", description).strip()
             if len(description) > 500:
                 description = description[:497] + "..."
 
-            # Clean up any HTML tags in description
-            description = re.sub(r"<[^>]+>", "", description)
-            description = description.strip()
+            posts.append(
+                BlogPost(title=title, date=pub_date, url=link, summary=description)
+            )
 
-            recent_posts.append(f"""**{title}**
-Date: {pub_date}
-URL: {link}
-Summary: {description}
-""")
+        await ctx.info(f"Returning {len(posts)} posts")
+        return posts
 
-        return f"""# Recent Blog Posts from Andrew Bolster
-
-Showing {len(recent_posts)} most recent posts from https://andrewbolster.info/
-
-{chr(10).join(recent_posts)}
-
-Note: Descriptions are truncated to 500 characters for readability. Visit the full URLs for complete articles."""
-
-    except requests.RequestException as e:
-        return f"Error fetching RSS feed: {str(e)}. Please try again later or visit https://andrewbolster.info/ directly."
+    except httpx.HTTPError as e:
+        await ctx.warning(f"HTTP error fetching RSS feed: {e}")
+        return []
     except ET.ParseError as e:
-        return f"Error parsing RSS feed: {str(e)}. The feed format may have changed."
+        await ctx.warning(f"RSS feed parse error: {e}")
+        return []
     except Exception as e:
-        return f"Error processing RSS feed: {str(e)}. Please try again later."
+        await ctx.warning(f"Unexpected error in get_recent_blog_posts: {e}")
+        return []
 
 
 if __name__ == "__main__":
