@@ -81,6 +81,39 @@ uv run pre-commit install
 uv run pre-commit run --all-files
 ```
 
+## 🔐 Authentication
+
+Admin tools (`get_server_info`, `get_cache_info`) require GitHub OAuth authentication. Public tools and resources are accessible without authentication.
+
+### Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `GITHUB_CLIENT_ID` | For admin tools | GitHub OAuth App client ID |
+| `GITHUB_CLIENT_SECRET` | For admin tools | GitHub OAuth App client secret |
+| `MCP_BASE_URL` | For admin tools | Public base URL of this server (e.g. `https://mcp.bolster.online/mcp`) |
+| `GITHUB_ALLOWED_LOGINS` | Optional | Comma-separated GitHub usernames permitted admin access (default: `andrewbolster`) |
+
+If `GITHUB_CLIENT_ID` or `GITHUB_CLIENT_SECRET` are not set, the server starts without auth and admin tools will reject all requests.
+
+### Setting up the GitHub OAuth App
+
+1. Go to [GitHub → Settings → Developer settings → OAuth Apps → New OAuth App](https://github.com/settings/applications/new)
+2. Set **Authorization callback URL** to `https://mcp.bolster.online/mcp/auth/callback`
+3. Copy the **Client ID** and generate a **Client Secret**
+4. Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in the systemd service environment (see deployment section)
+
+### Systemd environment configuration
+
+```bash
+# /etc/systemd/system/mcp-bolster.service.d/auth.conf
+[Service]
+Environment="GITHUB_CLIENT_ID=Ov23li..."
+Environment="GITHUB_CLIENT_SECRET=your_secret_here"
+Environment="MCP_BASE_URL=https://mcp.bolster.online/mcp"
+Environment="GITHUB_ALLOWED_LOGINS=andrewbolster"
+```
+
 ## 🚀 Deployment
 
 ### nginx + Webhook Deployment

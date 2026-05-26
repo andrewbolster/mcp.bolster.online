@@ -15,12 +15,35 @@ from typing import Annotated, Any
 import fastmcp
 import httpx
 from fastmcp import Context, FastMCP
-from fastmcp.server.dependencies import get_http_request
+from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.dependencies import get_access_token
 from fastmcp.tools.tool import ToolAnnotations
 
-# Initialize the MCP server
+# GitHub OAuth — set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in the environment.
+# GITHUB_ALLOWED_LOGINS: comma-separated list of GitHub usernames permitted admin access.
+# MCP_BASE_URL: public base URL of this server (e.g. https://mcp.bolster.online/mcp).
+_GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID")
+_GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET")
+_MCP_BASE_URL = os.environ.get("MCP_BASE_URL", "https://mcp.bolster.online/mcp")
+_ALLOWED_LOGINS: set[str] = {
+    login.strip()
+    for login in os.environ.get("GITHUB_ALLOWED_LOGINS", "andrewbolster").split(",")
+    if login.strip()
+}
+
+_auth: GitHubProvider | None = None
+if _GITHUB_CLIENT_ID and _GITHUB_CLIENT_SECRET:
+    _auth = GitHubProvider(
+        client_id=_GITHUB_CLIENT_ID,
+        client_secret=_GITHUB_CLIENT_SECRET,
+        base_url=_MCP_BASE_URL,
+        required_scopes=["user"],
+        cache_ttl_seconds=300,
+    )
+
 mcp = FastMCP(
     name="Andrew Bolster Resources",
+    auth=_auth,
     instructions="""
         This server provides curated resources and links about Andrew Bolster,
         including his professional background, research interests, community involvement,
@@ -461,36 +484,17 @@ async def get_recent_blog_posts(
 _START_TIME = datetime.now()
 
 
-def _get_admin_token() -> str | None:
-    """Return the configured admin token, or None if admin auth is not configured."""
-    return os.environ.get("MCP_ADMIN_TOKEN") or None
-
-
-def _is_authenticated() -> bool:
-    """Check whether the current request carries a valid admin bearer token.
-
-    Returns False (not True) when no token is configured — admin access is
-    explicitly disabled rather than open when the env var is absent.
-    """
-    token = _get_admin_token()
+def _require_admin(token: Any) -> None:
+    """Raise PermissionError if the token owner is not in the allowed logins list."""
     if token is None:
-        return False
-    try:
-        request = get_http_request()
-        auth_header = request.headers.get("authorization", "")
-    except Exception:
-        return False
-    if not auth_header.lower().startswith("bearer "):
-        return False
-    return auth_header[7:].strip() == token
-
-
-def _require_auth() -> None:
-    """Raise PermissionError if the request is not authenticated."""
-    if not _is_authenticated():
         raise PermissionError(
-            "This tool requires admin authentication. "
-            "Provide a valid Bearer token in the Authorization header."
+            "This tool requires authentication. "
+            "Provide a valid GitHub OAuth Bearer token."
+        )
+    login = token.claims.get("login") if hasattr(token, "claims") else None
+    if login not in _ALLOWED_LOGINS:
+        raise PermissionError(
+            f"GitHub user '{login}' is not authorised to use admin tools."
         )
 
 
@@ -498,21 +502,23 @@ def _require_auth() -> None:
 async def get_server_info(ctx: Context) -> str:
     """[Admin] Return server runtime information: FastMCP version, uptime, and environment.
 
-    Requires admin Bearer token authentication via the Authorization header.
+    Requires GitHub OAuth authentication. Only permitted GitHub users may call this.
     """
-    _require_auth()
+    token = get_access_token()
+    _require_admin(token)
     uptime = datetime.now() - _START_TIME
     hours, remainder = divmod(int(uptime.total_seconds()), 3600)
     minutes, seconds = divmod(remainder, 60)
-    token_configured = _get_admin_token() is not None
-    await ctx.info("Admin: server_info requested")
+    login = token.claims.get("login", "unknown") if hasattr(token, "claims") else "unknown"  # type: ignore[union-attr]
+    await ctx.info(f"Admin: server_info requested by {login}")
     return f"""# MCP Server Info
 
 **FastMCP version:** {fastmcp.__version__}
 **Server name:** {mcp.name}
 **Uptime:** {hours}h {minutes}m {seconds}s
 **Started:** {_START_TIME.strftime("%Y-%m-%d %H:%M:%S")}
-**Admin token configured:** {token_configured}
+**Authenticated as:** {login}
+**Auth configured:** {_auth is not None}
 **Python:** {__import__("sys").version.split()[0]}
 """
 
@@ -521,10 +527,12 @@ async def get_server_info(ctx: Context) -> str:
 async def get_cache_info(ctx: Context) -> str:
     """[Admin] Return bolster data cache statistics: size, location, and stale entries.
 
-    Requires admin Bearer token authentication via the Authorization header.
+    Requires GitHub OAuth authentication. Only permitted GitHub users may call this.
     """
-    _require_auth()
-    await ctx.info("Admin: cache_info requested")
+    token = get_access_token()
+    _require_admin(token)
+    login = token.claims.get("login", "unknown") if hasattr(token, "claims") else "unknown"  # type: ignore[union-attr]
+    await ctx.info(f"Admin: cache_info requested by {login}")
     try:
         import shutil
 
