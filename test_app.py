@@ -6,6 +6,7 @@ Tests both resources and tools using FastMCP in-memory testing patterns.
 """
 
 import json
+import os
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,6 +14,7 @@ import httpx
 import pytest
 from fastmcp import Client
 
+import app
 from app import mcp
 
 
@@ -475,6 +477,106 @@ class TestIntegration:
                     "get_recent_blog_posts", {"limit": 3}
                 )
                 assert isinstance(get_posts(posts_result), list)
+
+
+def _make_mock_request(auth_header: str | None = None) -> MagicMock:
+    """Build a mock Starlette Request with the given Authorization header."""
+    mock_req = MagicMock()
+    headers = {}
+    if auth_header is not None:
+        headers["authorization"] = auth_header
+    mock_req.headers = headers
+    return mock_req
+
+
+class TestAdminAuth:
+    """Tests for bearer token authentication and admin tools."""
+
+    @pytest.mark.asyncio
+    async def test_no_token_configured_returns_false(self):
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("MCP_ADMIN_TOKEN", None)
+            assert app._is_authenticated() is False
+
+    @pytest.mark.asyncio
+    async def test_valid_token_authenticates(self):
+        mock_req = _make_mock_request("Bearer supersecret")
+        with patch("app._get_admin_token", return_value="supersecret"), patch(
+            "app.get_http_request", return_value=mock_req
+        ):
+            assert app._is_authenticated() is True
+
+    @pytest.mark.asyncio
+    async def test_wrong_token_rejected(self):
+        mock_req = _make_mock_request("Bearer wrongtoken")
+        with patch("app._get_admin_token", return_value="supersecret"), patch(
+            "app.get_http_request", return_value=mock_req
+        ):
+            assert app._is_authenticated() is False
+
+    @pytest.mark.asyncio
+    async def test_missing_header_rejected(self):
+        mock_req = _make_mock_request()
+        with patch("app._get_admin_token", return_value="supersecret"), patch(
+            "app.get_http_request", return_value=mock_req
+        ):
+            assert app._is_authenticated() is False
+
+    @pytest.mark.asyncio
+    async def test_non_bearer_scheme_rejected(self):
+        mock_req = _make_mock_request("Basic supersecret")
+        with patch("app._get_admin_token", return_value="supersecret"), patch(
+            "app.get_http_request", return_value=mock_req
+        ):
+            assert app._is_authenticated() is False
+
+    @pytest.mark.asyncio
+    async def test_get_http_request_exception_returns_false(self):
+        with patch("app._get_admin_token", return_value="supersecret"), patch(
+            "app.get_http_request", side_effect=RuntimeError("no request context")
+        ):
+            assert app._is_authenticated() is False
+
+    @pytest.mark.asyncio
+    async def test_server_info_requires_auth(self):
+        async with Client(mcp) as client:
+            with patch("app._is_authenticated", return_value=False):
+                with pytest.raises(Exception, match="admin authentication"):
+                    await client.call_tool("get_server_info", {})
+
+    @pytest.mark.asyncio
+    async def test_server_info_succeeds_when_authenticated(self):
+        async with Client(mcp) as client:
+            with patch("app._is_authenticated", return_value=True):
+                result = await client.call_tool("get_server_info", {})
+                assert "FastMCP version" in result.data
+                assert app.fastmcp.__version__ in result.data
+
+    @pytest.mark.asyncio
+    async def test_cache_info_requires_auth(self):
+        async with Client(mcp) as client:
+            with patch("app._is_authenticated", return_value=False):
+                with pytest.raises(Exception, match="admin authentication"):
+                    await client.call_tool("get_cache_info", {})
+
+    @pytest.mark.asyncio
+    async def test_cache_info_succeeds_when_authenticated(self):
+        async with Client(mcp) as client:
+            with patch("app._is_authenticated", return_value=True):
+                result = await client.call_tool("get_cache_info", {})
+                # Either returns cache stats or a graceful error — not an auth error
+                assert "admin authentication" not in result.data
+
+    @pytest.mark.asyncio
+    async def test_require_auth_raises_permission_error(self):
+        with patch("app._is_authenticated", return_value=False):
+            with pytest.raises(PermissionError):
+                app._require_auth()
+
+    @pytest.mark.asyncio
+    async def test_require_auth_passes_when_authenticated(self):
+        with patch("app._is_authenticated", return_value=True):
+            app._require_auth()  # should not raise
 
 
 if __name__ == "__main__":

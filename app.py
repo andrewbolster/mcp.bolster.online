@@ -6,13 +6,16 @@ This MCP server provides curated resources and links about Andrew Bolster,
 a Northern Ireland-based technology researcher, data scientist, and community builder.
 """
 
+import os
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
+import fastmcp
 import httpx
 from fastmcp import Context, FastMCP
+from fastmcp.server.dependencies import get_http_request
 from fastmcp.tools.tool import ToolAnnotations
 
 # Initialize the MCP server
@@ -453,6 +456,137 @@ async def get_recent_blog_posts(
     except Exception as e:
         await ctx.warning(f"Unexpected error in get_recent_blog_posts: {e}")
         return []
+
+
+_START_TIME = datetime.now()
+
+
+def _get_admin_token() -> str | None:
+    """Return the configured admin token, or None if admin auth is not configured."""
+    return os.environ.get("MCP_ADMIN_TOKEN") or None
+
+
+def _is_authenticated() -> bool:
+    """Check whether the current request carries a valid admin bearer token.
+
+    Returns False (not True) when no token is configured — admin access is
+    explicitly disabled rather than open when the env var is absent.
+    """
+    token = _get_admin_token()
+    if token is None:
+        return False
+    try:
+        request = get_http_request()
+        auth_header = request.headers.get("authorization", "")
+    except Exception:
+        return False
+    if not auth_header.lower().startswith("bearer "):
+        return False
+    return auth_header[7:].strip() == token
+
+
+def _require_auth() -> None:
+    """Raise PermissionError if the request is not authenticated."""
+    if not _is_authenticated():
+        raise PermissionError(
+            "This tool requires admin authentication. "
+            "Provide a valid Bearer token in the Authorization header."
+        )
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_server_info(ctx: Context) -> str:
+    """[Admin] Return server runtime information: FastMCP version, uptime, and environment.
+
+    Requires admin Bearer token authentication via the Authorization header.
+    """
+    _require_auth()
+    uptime = datetime.now() - _START_TIME
+    hours, remainder = divmod(int(uptime.total_seconds()), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    token_configured = _get_admin_token() is not None
+    await ctx.info("Admin: server_info requested")
+    return f"""# MCP Server Info
+
+**FastMCP version:** {fastmcp.__version__}
+**Server name:** {mcp.name}
+**Uptime:** {hours}h {minutes}m {seconds}s
+**Started:** {_START_TIME.strftime("%Y-%m-%d %H:%M:%S")}
+**Admin token configured:** {token_configured}
+**Python:** {__import__("sys").version.split()[0]}
+"""
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_cache_info(ctx: Context) -> str:
+    """[Admin] Return bolster data cache statistics: size, location, and stale entries.
+
+    Requires admin Bearer token authentication via the Authorization header.
+    """
+    _require_auth()
+    await ctx.info("Admin: cache_info requested")
+    try:
+        import shutil
+
+        import platformdirs
+
+        cache_dir = platformdirs.user_cache_dir("bolster")
+        if not os.path.isdir(cache_dir):
+            return f"Cache directory does not exist: {cache_dir}"
+
+        total_size = 0
+        file_count = 0
+        stale_count = 0
+        now = datetime.now().timestamp()
+        oldest: float | None = None
+        newest: float | None = None
+
+        for dirpath, _dirnames, filenames in os.walk(cache_dir):
+            for fname in filenames:
+                fpath = os.path.join(dirpath, fname)
+                try:
+                    stat = os.stat(fpath)
+                    total_size += stat.st_size
+                    file_count += 1
+                    mtime = stat.st_mtime
+                    if oldest is None or mtime < oldest:
+                        oldest = mtime
+                    if newest is None or mtime > newest:
+                        newest = mtime
+                    age_days = (now - mtime) / 86400
+                    if age_days > 7:
+                        stale_count += 1
+                except OSError:
+                    pass
+
+        disk = shutil.disk_usage(cache_dir)
+        size_mb = total_size / (1024 * 1024)
+        oldest_str = (
+            datetime.fromtimestamp(oldest).strftime("%Y-%m-%d")
+            if oldest
+            else "n/a"
+        )
+        newest_str = (
+            datetime.fromtimestamp(newest).strftime("%Y-%m-%d")
+            if newest
+            else "n/a"
+        )
+
+        return f"""# Bolster Cache Info
+
+**Cache directory:** {cache_dir}
+**Total files:** {file_count}
+**Total size:** {size_mb:.2f} MB
+**Stale files (>7 days):** {stale_count}
+**Oldest entry:** {oldest_str}
+**Newest entry:** {newest_str}
+**Disk free:** {disk.free / (1024**3):.1f} GB
+"""
+    except ImportError:
+        return "platformdirs not available — cannot determine cache location."
+    except Exception as e:
+        await ctx.warning(f"Error reading cache info: {e}")
+        return f"Error reading cache info: {e}"
 
 
 if __name__ == "__main__":
