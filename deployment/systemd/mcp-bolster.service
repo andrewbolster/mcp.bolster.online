@@ -14,6 +14,7 @@ WorkingDirectory=/opt/mcp.bolster.online
 Environment=PYTHONPATH=/opt/mcp.bolster.online
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=/opt/mcp.bolster.online/.venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/opt/mcp.bolster.online
 
 # Command to start the service
 ExecStart=/opt/mcp.bolster.online/.venv/bin/fastmcp run app.py:mcp --transport=http --port 9001
@@ -30,7 +31,6 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/mcp.bolster.online
-ReadOnlyPaths=/opt/mcp.bolster.online
 
 # Resource limits
 LimitNOFILE=65536
