@@ -87,8 +87,8 @@ print(f'✅ Tools: {[t for t in dir(app) if callable(getattr(app, t, None)) and 
 log_message "Starting MCP service"
 sudo systemctl start "$SERVICE_NAME" || handle_error "Start service"
 
-# Wait a moment and check service status
-sleep 2
+# Wait for service to finish initializing before checking status
+sleep 5
 if sudo systemctl is-active --quiet "$SERVICE_NAME"; then
     log_message "✅ Deployment successful - service is running"
 else
