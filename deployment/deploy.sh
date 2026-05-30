@@ -8,10 +8,14 @@ DEPLOYMENT_DIR="/opt/mcp.bolster.online"
 SERVICE_NAME="mcp-bolster"
 LOG_FILE="/var/log/mcp-bolster-deploy.log"
 
-# Function to log messages (write directly to file; avoid tee to prevent SIGPIPE
-# killing deploy.sh after the webhook service restarts mid-deployment)
+# Redirect all output to the log file immediately. This detaches us from the
+# webhook's stdout pipe, so when the webhook service restarts mid-deployment
+# (to reload its config) there's no SIGPIPE killing us or our child processes.
+exec 1>>"$LOG_FILE" 2>&1
+
+# Function to log messages
 log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S'): $1" >> "$LOG_FILE" || true
+    echo "$(date '+%Y-%m-%d %H:%M:%S'): $1"
 }
 
 # Function to handle errors
