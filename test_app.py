@@ -507,7 +507,9 @@ class TestAdminAuth:
             # Re-evaluate the set as the module would on startup
             logins = {
                 entry.strip()
-                for entry in os.environ.get("GITHUB_ALLOWED_LOGINS", "andrewbolster").split(",")
+                for entry in os.environ.get(
+                    "GITHUB_ALLOWED_LOGINS", "andrewbolster"
+                ).split(",")
                 if entry.strip()
             }
         assert logins == {"alice", "bob"}
