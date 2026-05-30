@@ -34,10 +34,13 @@ log_message "Pulling latest changes from GitHub"
 git fetch origin main || handle_error "Git fetch"
 git reset --hard origin/main || handle_error "Git reset"
 
-# Re-inject webhook secret (git pull resets webhook.json to its placeholder)
+# Re-inject webhook secret (git reset reverts webhook.json to its placeholder)
 if [ -n "${WEBHOOK_SECRET}" ]; then
     sed -i 's|$WEBHOOK_SECRET|'"${WEBHOOK_SECRET}"'|g' deployment/webhook.json
     log_message "Webhook secret injected into config"
+    # Reload webhook service so it picks up the re-injected config
+    # (hotreload stops watching after git reset replaces the file)
+    sudo systemctl restart mcp-webhook || log_message "WARNING: webhook restart failed"
 else
     log_message "WARNING: WEBHOOK_SECRET not set, skipping secret injection"
 fi
