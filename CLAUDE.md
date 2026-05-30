@@ -29,6 +29,7 @@ This is a fully-featured MCP (Model Context Protocol) server providing curated r
 ## Key Features
 
 ### MCP Server Resources (app.py)
+
 - `resource://andrew-bolster/personal-website` - Main website information
 - `resource://andrew-bolster/professional-profile` - Current roles and background
 - `resource://andrew-bolster/farset-labs` - Belfast hackerspace information
@@ -38,6 +39,7 @@ This is a fully-featured MCP (Model Context Protocol) server providing curated r
 - `resource://andrew-bolster/technical-blog` - Blog information and topics
 
 ### MCP Server Tools (app.py)
+
 - `send_contact_message(message, sender)` - Contact tool with email integration placeholder
 - `check_availability(start_date, days_ahead)` - Calendar availability via iCal feed parsing
 - `get_recent_blog_posts(limit)` - Fetch recent posts from RSS feed (max 10)
@@ -47,6 +49,7 @@ This is a fully-featured MCP (Model Context Protocol) server providing curated r
 ## Development Commands
 
 ### Setup & Dependencies
+
 ```bash
 # Install dependencies (uses modern uv package manager)
 uv sync
@@ -59,6 +62,7 @@ uv run python app.py
 ```
 
 ### Testing & Quality
+
 ```bash
 # Run tests with coverage
 uv run pytest test_app.py -v
@@ -83,6 +87,7 @@ uv run pre-commit run --all-files # Manual run
 ## GitHub Actions Automation
 
 ### 🧪 Test & Coverage Workflow
+
 - **Multi-platform testing**: Ubuntu (latest, 22.04), ARM64 (24.04)
 - **Python versions**: 3.11, 3.12, 3.13
 - **Coverage reporting**: Codecov integration with PR comments
@@ -92,6 +97,7 @@ uv run pre-commit run --all-files # Manual run
 - **Removed Windows**: Windows Server 2025 preview had dependency issues
 
 ### 🔍 Code Quality Workflow
+
 - **Modern tooling**: Ruff (linting + formatting), mypy (type checking)
 - **Pre-commit integration**: Automatic quality checks on every commit
 - **Code analysis**: Radon complexity analysis with GitHub Actions summaries
@@ -99,6 +105,7 @@ uv run pre-commit run --all-files # Manual run
 - **Performance**: Single tool (Ruff) replaces Black + isort + flake8 for speed
 
 ### 🤖 AI Content Review Workflow
+
 - **GitHub Models integration**: Uses latest AI models (GPT-4o-mini, Llama, Mistral)
 - **Content validation**: Automatically reviews MCP resources for accuracy
 - **Web verification**: Checks andrewbolster.info for current information
@@ -107,6 +114,7 @@ uv run pre-commit run --all-files # Manual run
 - **Structured prompts**: Professional AI guidance via .github/prompts/
 
 ### 🎮 Fun Experiments Workflow
+
 - **ARM64 performance**: Benchmarking on new GitHub ARM runners
 - **Dynamic badges**: Real-time project statistics generation
 - **Health checks**: MCP server functionality validation
@@ -116,18 +124,21 @@ uv run pre-commit run --all-files # Manual run
 ## Architecture Notes
 
 ### FastMCP Implementation
+
 - **Server Framework**: Uses FastMCP for modern MCP development
 - **Async Support**: Full async/await pattern with proper error handling
 - **Resource Pattern**: Structured resource definitions with comprehensive content
 - **Tool Pattern**: Type-safe tool implementations with validation
 
 ### Testing Strategy
+
 - **In-memory testing**: Direct FastMCP Client-Server connection for speed
 - **Mock integration**: unittest.mock for external dependencies (iCal, requests)
 - **Coverage targets**: Aiming for 95%+ coverage with meaningful tests
 - **Performance testing**: Benchmarking critical paths
 
 ### AI Integration
+
 - **Content validation**: Monthly AI-powered reviews of resource accuracy
 - **GitHub Models**: Integration with latest GitHub AI features
 - **Structured prompts**: Professional prompt engineering in version control
@@ -136,10 +147,10 @@ uv run pre-commit run --all-files # Manual run
 ## Development Workflow
 
 1. **Local Development**: Use `uv` for fast dependency management and testing
-2. **Quality Gates**: Ruff, Black, mypy run automatically on push
-3. **Testing**: Comprehensive test suite runs on multiple platforms
-4. **AI Review**: Monthly content validation with actionable recommendations
-5. **Deployment**: nginx + webhook deployment documentation provided
+1. **Quality Gates**: Ruff, Black, mypy run automatically on push
+1. **Testing**: Comprehensive test suite runs on multiple platforms
+1. **AI Review**: Monthly content validation with actionable recommendations
+1. **Deployment**: nginx + webhook deployment documentation provided
 
 ## Important Files to Understand
 
@@ -153,12 +164,14 @@ uv run pre-commit run --all-files # Manual run
 ## Technical Decisions Made
 
 ### Code Quality Evolution
+
 - **Switched from Black + isort to Ruff**: Single tool for linting and formatting (faster, simpler)
 - **Pre-commit hooks**: Automatic code quality enforcement with comprehensive checks
 - **Modern type annotations**: Updated from `Dict`/`Optional` to `dict`/`|` syntax
 - **Ruff configuration**: Allows long lines in docstrings/strings for better readability
 
 ### Platform Support
+
 - **Removed Windows Server 2025**: Preview OS had dependency installation issues
 - **Added ARM64 testing**: Testing on GitHub's new ARM64 runners
 - **Ubuntu focus**: Reliable cross-version compatibility (latest, 22.04, 24.04)
@@ -166,6 +179,7 @@ uv run pre-commit run --all-files # Manual run
 ## Current Status: Production Ready
 
 This MCP server is fully functional with:
+
 - ✅ Comprehensive resource coverage about Andrew Bolster (7 resources)
 - ✅ Working contact and availability tools (2 tools)
 - ✅ 92% test coverage with modern testing practices

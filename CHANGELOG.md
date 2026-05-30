@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## \[Unreleased\]
 
 ### Added
 
@@ -27,7 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - README description of available MCP tools (was missing `get_recent_blog_posts`)
 - `pyproject.toml` placeholder description updated to accurate project description
 
-## [0.1.0] - 2024-01-01
+## \[0.1.0\] - 2024-01-01
 
 ### Added
 

@@ -22,6 +22,7 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 ## 🚀 Features
 
 ### MCP Resources
+
 - **Personal Website** - Main website and technical blog
 - **Professional Profile** - Current roles and expertise
 - **Farset Labs** - Belfast hackerspace co-founder information
@@ -31,11 +32,13 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 - **Technical Blog** - Writing and thought leadership
 
 ### MCP Tools
+
 - **Contact Tool** - Send professional inquiries (placeholder implementation)
 - **Availability Tool** - Check calendar availability via public iCal feed
 - **Blog Posts Tool** - Fetch recent posts from RSS feed
 
 ### Development Features
+
 - **FastMCP Framework** - Modern MCP server development
 - **92% Test Coverage** - Comprehensive test suite with pytest
 - **Multi-Platform Support** - Ubuntu Latest & 22.04, Python 3.11-3.13
@@ -46,10 +49,12 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 ## Development
 
 ### Prerequisites
+
 - Python 3.11+
 - uv (package manager)
 
 ### Setup
+
 ```bash
 git clone https://github.com/andrewbolster/mcp.bolster.online.git
 cd mcp.bolster.online
@@ -57,6 +62,7 @@ uv sync
 ```
 
 ### Running Tests
+
 ```bash
 # Run tests with coverage
 uv run pytest test_app.py --cov=app --cov-report=term-missing -v
@@ -68,11 +74,13 @@ uv run mypy app.py --ignore-missing-imports  # Type checking
 ```
 
 ### Running the Server
+
 ```bash
 uv run python app.py
 ```
 
 ### Pre-commit Setup
+
 ```bash
 # Install pre-commit hooks (automatic code quality)
 uv run pre-commit install
@@ -90,6 +98,7 @@ This section covers deploying the MCP server on a Linux server using nginx as a 
 #### 1. Server Setup
 
 **Install Dependencies:**
+
 ```bash
 sudo apt update
 sudo apt install nginx python3 python3-pip git webhook
@@ -97,12 +106,14 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 **Create Deployment Directory:**
+
 ```bash
 sudo mkdir -p /opt/mcp.bolster.online
 sudo chown $USER:$USER /opt/mcp.bolster.online
 ```
 
 **Clone Repository:**
+
 ```bash
 cd /opt
 git clone https://github.com/andrewbolster/mcp.bolster.online.git
@@ -115,6 +126,7 @@ uv sync
 All configuration files are maintained in the repository under `deployment/`. Use symlinks to connect them to system locations:
 
 **Create systemd services:**
+
 ```bash
 # Link service files from repository
 sudo ln -sf /opt/mcp.bolster.online/deployment/systemd/mcp-bolster.service /etc/systemd/system/
@@ -128,6 +140,7 @@ sudo systemctl status mcp-bolster mcp-webhook
 ```
 
 **Configure nginx:**
+
 ```bash
 # Link nginx configuration from repository
 sudo ln -sf /opt/mcp.bolster.online/deployment/nginx/mcp.bolster.online /etc/nginx/sites-available/
@@ -141,6 +154,7 @@ sudo systemctl reload nginx
 #### 3. Customize Webhook Configuration
 
 **Edit webhook secret:**
+
 ```bash
 # Edit the webhook configuration file
 nano /opt/mcp.bolster.online/deployment/webhook.json
@@ -148,6 +162,7 @@ nano /opt/mcp.bolster.online/deployment/webhook.json
 ```
 
 **Restart webhook service after changes:**
+
 ```bash
 sudo systemctl restart mcp-webhook
 ```
@@ -155,7 +170,7 @@ sudo systemctl restart mcp-webhook
 #### 4. GitHub Repository Setup
 
 1. Go to repository settings → Webhooks
-2. Add webhook:
+1. Add webhook:
    - **Payload URL**: `http://mcp.bolster.online/webhook`
    - **Content type**: `application/json`
    - **Secret**: Same as configured in `deployment/webhook.json`
@@ -174,6 +189,7 @@ sudo certbot --nginx -d mcp.bolster.online
 The deployment setup includes several advanced features:
 
 **Automatic Deployment Pipeline:**
+
 - ✅ Pulls latest code from `main` branch
 - ✅ Updates dependencies with `uv sync`
 - ✅ Runs full test suite before deployment
@@ -184,6 +200,7 @@ The deployment setup includes several advanced features:
 - ✅ Skip deployment with `[skip deploy]` in commit message
 
 **Security Features:**
+
 - 🔒 GitHub IP allowlist for webhook endpoint
 - 🔒 Rate limiting on webhook endpoint (5 requests/minute)
 - 🔒 Webhook signature verification
@@ -193,6 +210,7 @@ The deployment setup includes several advanced features:
 - 🔒 Security headers and sensitive file blocking
 
 **Monitoring & Maintenance:**
+
 - 📊 Structured logging to systemd journal
 - 📊 Deployment logs in `/var/log/mcp-bolster-deploy.log`
 - 📊 Health check endpoint at `/health`
@@ -202,6 +220,7 @@ The deployment setup includes several advanced features:
 #### 7. Monitoring Commands
 
 **Check service status:**
+
 ```bash
 sudo systemctl status mcp-bolster mcp-webhook
 sudo journalctl -u mcp-bolster -f
@@ -209,17 +228,20 @@ sudo journalctl -u mcp-webhook -f
 ```
 
 **Check deployment logs:**
+
 ```bash
 tail -f /var/log/mcp-bolster-deploy.log
 ```
 
 **Test deployment:**
+
 ```bash
 # Manual deployment trigger (for testing)
 sudo /opt/mcp.bolster.online/deployment/deploy.sh
 ```
 
 **Check configuration:**
+
 ```bash
 # Test nginx configuration
 sudo nginx -t
@@ -233,9 +255,9 @@ webhook -hooks /opt/mcp.bolster.online/deployment/webhook.json -verbose -dry-run
 Since all configuration files are in the repository, updates are automatic:
 
 1. **Update configuration files** in the `deployment/` directory
-2. **Commit and push** changes to GitHub
-3. **Services automatically restart** with new configuration via symlinks
-4. **For immediate updates** without waiting for webhook:
+1. **Commit and push** changes to GitHub
+1. **Services automatically restart** with new configuration via symlinks
+1. **For immediate updates** without waiting for webhook:
    ```bash
    cd /opt/mcp.bolster.online
    git pull origin main
