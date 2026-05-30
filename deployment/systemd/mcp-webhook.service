@@ -24,7 +24,7 @@ KillMode=process
 # Security settings
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/mcp.bolster.online /var/log
+ReadWritePaths=/opt/mcp.bolster.online /var/log /var/www/.cache
 
 # Resource limits
 LimitNOFILE=1024
