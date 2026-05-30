@@ -6,44 +6,18 @@ This MCP server provides curated resources and links about Andrew Bolster,
 a Northern Ireland-based technology researcher, data scientist, and community builder.
 """
 
-import os
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
-import fastmcp
 import httpx
 from fastmcp import Context, FastMCP
-from fastmcp.server.auth.providers.github import GitHubProvider
-from fastmcp.server.dependencies import get_access_token
 from fastmcp.tools.tool import ToolAnnotations
 
-# GitHub OAuth — set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in the environment.
-# GITHUB_ALLOWED_LOGINS: comma-separated list of GitHub usernames permitted admin access.
-# MCP_BASE_URL: public base URL of this server (e.g. https://mcp.bolster.online/mcp).
-_GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID")
-_GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET")
-_MCP_BASE_URL = os.environ.get("MCP_BASE_URL", "https://mcp.bolster.online/mcp")
-_ALLOWED_LOGINS: set[str] = {
-    login.strip()
-    for login in os.environ.get("GITHUB_ALLOWED_LOGINS", "andrewbolster").split(",")
-    if login.strip()
-}
-
-_auth: GitHubProvider | None = None
-if _GITHUB_CLIENT_ID and _GITHUB_CLIENT_SECRET:
-    _auth = GitHubProvider(
-        client_id=_GITHUB_CLIENT_ID,
-        client_secret=_GITHUB_CLIENT_SECRET,
-        base_url=_MCP_BASE_URL,
-        required_scopes=["user"],
-        cache_ttl_seconds=300,
-    )
-
+# Initialize the MCP server
 mcp = FastMCP(
     name="Andrew Bolster Resources",
-    auth=_auth,
     instructions="""
         This server provides curated resources and links about Andrew Bolster,
         including his professional background, research interests, community involvement,
@@ -479,124 +453,6 @@ async def get_recent_blog_posts(
     except Exception as e:
         await ctx.warning(f"Unexpected error in get_recent_blog_posts: {e}")
         return []
-
-
-_START_TIME = datetime.now()
-
-
-def _require_admin(token: Any) -> None:
-    """Raise PermissionError if the token owner is not in the allowed logins list."""
-    if token is None:
-        raise PermissionError(
-            "This tool requires authentication. "
-            "Provide a valid GitHub OAuth Bearer token."
-        )
-    login = token.claims.get("login") if hasattr(token, "claims") else None
-    if login not in _ALLOWED_LOGINS:
-        raise PermissionError(
-            f"GitHub user '{login}' is not authorised to use admin tools."
-        )
-
-
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_server_info(ctx: Context) -> str:
-    """[Admin] Return server runtime information: FastMCP version, uptime, and environment.
-
-    Requires GitHub OAuth authentication. Only permitted GitHub users may call this.
-    """
-    token = get_access_token()
-    _require_admin(token)
-    assert token is not None
-    uptime = datetime.now() - _START_TIME
-    hours, remainder = divmod(int(uptime.total_seconds()), 3600)
-    minutes, seconds = divmod(remainder, 60)
-    login = (
-        token.claims.get("login", "unknown") if hasattr(token, "claims") else "unknown"
-    )
-    await ctx.info(f"Admin: server_info requested by {login}")
-    return f"""# MCP Server Info
-
-**FastMCP version:** {fastmcp.__version__}
-**Server name:** {mcp.name}
-**Uptime:** {hours}h {minutes}m {seconds}s
-**Started:** {_START_TIME.strftime("%Y-%m-%d %H:%M:%S")}
-**Authenticated as:** {login}
-**Auth configured:** {_auth is not None}
-**Python:** {__import__("sys").version.split()[0]}
-"""
-
-
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_cache_info(ctx: Context) -> str:
-    """[Admin] Return bolster data cache statistics: size, location, and stale entries.
-
-    Requires GitHub OAuth authentication. Only permitted GitHub users may call this.
-    """
-    token = get_access_token()
-    _require_admin(token)
-    assert token is not None
-    login = (
-        token.claims.get("login", "unknown") if hasattr(token, "claims") else "unknown"
-    )
-    await ctx.info(f"Admin: cache_info requested by {login}")
-    try:
-        import shutil
-
-        import platformdirs
-
-        cache_dir = platformdirs.user_cache_dir("bolster")
-        if not os.path.isdir(cache_dir):
-            return f"Cache directory does not exist: {cache_dir}"
-
-        total_size = 0
-        file_count = 0
-        stale_count = 0
-        now = datetime.now().timestamp()
-        oldest: float | None = None
-        newest: float | None = None
-
-        for dirpath, _dirnames, filenames in os.walk(cache_dir):
-            for fname in filenames:
-                fpath = os.path.join(dirpath, fname)
-                try:
-                    stat = os.stat(fpath)
-                    total_size += stat.st_size
-                    file_count += 1
-                    mtime = stat.st_mtime
-                    if oldest is None or mtime < oldest:
-                        oldest = mtime
-                    if newest is None or mtime > newest:
-                        newest = mtime
-                    age_days = (now - mtime) / 86400
-                    if age_days > 7:
-                        stale_count += 1
-                except OSError:
-                    pass
-
-        disk = shutil.disk_usage(cache_dir)
-        size_mb = total_size / (1024 * 1024)
-        oldest_str = (
-            datetime.fromtimestamp(oldest).strftime("%Y-%m-%d") if oldest else "n/a"
-        )
-        newest_str = (
-            datetime.fromtimestamp(newest).strftime("%Y-%m-%d") if newest else "n/a"
-        )
-
-        return f"""# Bolster Cache Info
-
-**Cache directory:** {cache_dir}
-**Total files:** {file_count}
-**Total size:** {size_mb:.2f} MB
-**Stale files (>7 days):** {stale_count}
-**Oldest entry:** {oldest_str}
-**Newest entry:** {newest_str}
-**Disk free:** {disk.free / (1024**3):.1f} GB
-"""
-    except ImportError:
-        return "platformdirs not available — cannot determine cache location."
-    except Exception as e:
-        await ctx.warning(f"Error reading cache info: {e}")
-        return f"Error reading cache info: {e}"
 
 
 if __name__ == "__main__":

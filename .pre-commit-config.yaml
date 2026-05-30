@@ -38,3 +38,10 @@ repos:
       - id: bandit
         args: [-r]
         exclude: ^test_
+
+  - repo: https://github.com/gitguardian/ggshield
+    rev: v1.34.0
+    hooks:
+      - id: ggshield
+        language: python
+        stages: [commit]
