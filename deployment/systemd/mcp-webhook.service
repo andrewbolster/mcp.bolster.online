@@ -19,6 +19,7 @@ Restart=always
 RestartSec=3
 StartLimitInterval=300
 StartLimitBurst=5
+KillMode=process
 
 # Security settings
 ProtectSystem=strict
