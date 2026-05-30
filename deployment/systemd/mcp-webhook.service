@@ -21,11 +21,9 @@ StartLimitInterval=300
 StartLimitBurst=5
 
 # Security settings
-NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/mcp.bolster.online /var/log
-ReadOnlyPaths=/opt/mcp.bolster.online
 
 # Resource limits
 LimitNOFILE=1024
@@ -39,6 +37,7 @@ SyslogIdentifier=mcp-webhook
 
 # Environment
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/etc/default/mcp-webhook
 
 [Install]
 WantedBy=multi-user.target
