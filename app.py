@@ -506,10 +506,13 @@ async def get_server_info(ctx: Context) -> str:
     """
     token = get_access_token()
     _require_admin(token)
+    assert token is not None
     uptime = datetime.now() - _START_TIME
     hours, remainder = divmod(int(uptime.total_seconds()), 3600)
     minutes, seconds = divmod(remainder, 60)
-    login = token.claims.get("login", "unknown") if hasattr(token, "claims") else "unknown"  # type: ignore[union-attr]
+    login = (
+        token.claims.get("login", "unknown") if hasattr(token, "claims") else "unknown"
+    )
     await ctx.info(f"Admin: server_info requested by {login}")
     return f"""# MCP Server Info
 
@@ -531,7 +534,10 @@ async def get_cache_info(ctx: Context) -> str:
     """
     token = get_access_token()
     _require_admin(token)
-    login = token.claims.get("login", "unknown") if hasattr(token, "claims") else "unknown"  # type: ignore[union-attr]
+    assert token is not None
+    login = (
+        token.claims.get("login", "unknown") if hasattr(token, "claims") else "unknown"
+    )
     await ctx.info(f"Admin: cache_info requested by {login}")
     try:
         import shutil
@@ -570,14 +576,10 @@ async def get_cache_info(ctx: Context) -> str:
         disk = shutil.disk_usage(cache_dir)
         size_mb = total_size / (1024 * 1024)
         oldest_str = (
-            datetime.fromtimestamp(oldest).strftime("%Y-%m-%d")
-            if oldest
-            else "n/a"
+            datetime.fromtimestamp(oldest).strftime("%Y-%m-%d") if oldest else "n/a"
         )
         newest_str = (
-            datetime.fromtimestamp(newest).strftime("%Y-%m-%d")
-            if newest
-            else "n/a"
+            datetime.fromtimestamp(newest).strftime("%Y-%m-%d") if newest else "n/a"
         )
 
         return f"""# Bolster Cache Info
