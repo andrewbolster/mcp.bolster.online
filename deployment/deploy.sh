@@ -8,9 +8,10 @@ DEPLOYMENT_DIR="/opt/mcp.bolster.online"
 SERVICE_NAME="mcp-bolster"
 LOG_FILE="/var/log/mcp-bolster-deploy.log"
 
-# Function to log messages
+# Function to log messages (write directly to file; avoid tee to prevent SIGPIPE
+# killing deploy.sh after the webhook service restarts mid-deployment)
 log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S'): $1" | tee -a "$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S'): $1" >> "$LOG_FILE" || true
 }
 
 # Function to handle errors
