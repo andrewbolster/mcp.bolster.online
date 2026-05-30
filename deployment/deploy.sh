@@ -89,7 +89,7 @@ sudo systemctl start "$SERVICE_NAME" || handle_error "Start service"
 
 # Wait for service to finish initializing before checking status
 sleep 5
-if sudo systemctl is-active --quiet "$SERVICE_NAME"; then
+if [ "$(sudo systemctl is-active "$SERVICE_NAME")" = "active" ]; then
     log_message "✅ Deployment successful - service is running"
 else
     handle_error "Service failed to start after deployment"
