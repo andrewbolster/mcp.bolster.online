@@ -42,10 +42,14 @@ else
     log_message "WARNING: WEBHOOK_SECRET not set, skipping secret injection"
 fi
 
+# Redirect all cache dirs to writable location (ProtectSystem=strict makes /var/www/.cache read-only)
+export XDG_CACHE_HOME="/opt/mcp.bolster.online/.cache"
+export UV_CACHE_DIR="/opt/mcp.bolster.online/.cache/uv"
+export PRE_COMMIT_HOME="/opt/mcp.bolster.online/.cache/pre-commit"
+
 # Update dependencies
 log_message "Updating dependencies"
 UV_CMD=$(which uv 2>/dev/null || echo "/usr/local/bin/uv")
-export UV_CACHE_DIR="/opt/mcp.bolster.online/.cache/uv"
 $UV_CMD sync || handle_error "Dependency update"
 
 # Run pre-commit checks
