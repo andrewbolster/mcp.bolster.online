@@ -45,7 +45,7 @@ fi
 # Update dependencies
 log_message "Updating dependencies"
 # Use which to find uv in PATH, with fallback to known location
-UV_CMD=$(which uv || echo "/home/bolster/.local/bin/uv")
+UV_CMD=$(which uv 2>/dev/null || echo "/usr/local/bin/uv")
 $UV_CMD sync || handle_error "Dependency update"
 
 # Run pre-commit checks
