@@ -1,8 +1,5 @@
 """Tests for the click_mcp introspection harness using the fake CLI fixture."""
 
-import asyncio
-import json
-
 import click
 import pytest
 from fastmcp import Client, FastMCP

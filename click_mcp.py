@@ -14,8 +14,6 @@ Usage:
     register_click_commands(mcp, my_cli, prefix="my")
 """
 
-import io
-import sys
 from typing import Any
 
 import click
@@ -53,7 +51,9 @@ def _sentinel_is_unset(value: Any) -> bool:
     return type(value).__name__ == "Sentinel"
 
 
-def _build_tool_fn(root_group: click.Group, command_path: list[str], params: list[click.Parameter]):
+def _build_tool_fn(
+    root_group: click.Group, command_path: list[str], params: list[click.Parameter]
+):
     """
     Build a callable that invokes a Click command via CliRunner and returns stdout.
     The callable's __annotations__ are set so FastMCP can generate a proper schema.
@@ -62,7 +62,7 @@ def _build_tool_fn(root_group: click.Group, command_path: list[str], params: lis
     defaults: dict[str, Any] = {}
 
     for p in params:
-        if _is_internal(p):
+        if _is_internal(p) or p.name is None:
             continue
         py_type = _click_type_to_python(p)
         if _is_flag(p):
@@ -134,9 +134,15 @@ def _walk_and_register(
         doc_parts.append("\nParameters:")
         for p in visible_params:
             help_txt = getattr(p, "help", None) or ""
-            choices = f" Choices: {p.type.choices}" if isinstance(p.type, click.Choice) else ""
+            choices = (
+                f" Choices: {p.type.choices}"
+                if isinstance(p.type, click.Choice)
+                else ""
+            )
             default = p.default
-            default_str = "" if _sentinel_is_unset(default) else f" Default: {default!r}."
+            default_str = (
+                "" if _sentinel_is_unset(default) else f" Default: {default!r}."
+            )
             doc_parts.append(f"  {p.name}: {help_txt}{choices}{default_str}")
     docstring = "\n".join(doc_parts)
 
@@ -148,6 +154,8 @@ def _walk_and_register(
     # FastMCP inspects the function signature; we need real named args with defaults.
     sig_params = []
     for p in visible_params:
+        if p.name is None:
+            continue
         name = p.name
         if name in defaults:
             sig_params.append(f"{name}=defaults['{name}']")
@@ -162,7 +170,7 @@ def _walk_and_register(
     else:
         wrapper_src = "def _wrapper():\n    return tool_fn()\n"
     ns: dict[str, Any] = {"tool_fn": tool_fn, "defaults": defaults}
-    exec(wrapper_src, ns)  # noqa: S102
+    exec(wrapper_src, ns)  # noqa: S102  # nosec B102
     wrapper = ns["_wrapper"]
     wrapper.__name__ = tool_name
     wrapper.__doc__ = docstring
