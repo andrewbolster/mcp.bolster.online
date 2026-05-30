@@ -44,8 +44,8 @@ fi
 
 # Update dependencies
 log_message "Updating dependencies"
-# Use which to find uv in PATH, with fallback to known location
 UV_CMD=$(which uv 2>/dev/null || echo "/usr/local/bin/uv")
+export UV_CACHE_DIR="/opt/mcp.bolster.online/.cache/uv"
 $UV_CMD sync || handle_error "Dependency update"
 
 # Run pre-commit checks
