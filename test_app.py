@@ -6,6 +6,7 @@ Tests both resources and tools using FastMCP in-memory testing patterns.
 """
 
 import json
+import os
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,6 +14,7 @@ import httpx
 import pytest
 from fastmcp import Client
 
+import app
 from app import mcp
 
 
@@ -475,6 +477,82 @@ class TestIntegration:
                     "get_recent_blog_posts", {"limit": 3}
                 )
                 assert isinstance(get_posts(posts_result), list)
+
+
+def _mock_token(login: str) -> MagicMock:
+    """Build a mock AccessToken with the given GitHub login in claims."""
+    token = MagicMock()
+    token.claims = {"login": login, "name": login}
+    return token
+
+
+class TestAdminAuth:
+    """Tests for GitHub OAuth-based admin tool access control."""
+
+    def test_require_admin_passes_for_allowed_login(self):
+        token = _mock_token("andrewbolster")
+        app._require_admin(token)  # should not raise
+
+    def test_require_admin_rejects_unknown_login(self):
+        token = _mock_token("someoneelse")
+        with pytest.raises(PermissionError, match="not authorised"):
+            app._require_admin(token)
+
+    def test_require_admin_rejects_none_token(self):
+        with pytest.raises(PermissionError, match="requires authentication"):
+            app._require_admin(None)
+
+    def test_allowed_logins_from_env(self):
+        with patch.dict("os.environ", {"GITHUB_ALLOWED_LOGINS": "alice,bob"}):
+            # Re-evaluate the set as the module would on startup
+            logins = {
+                entry.strip()
+                for entry in os.environ.get(
+                    "GITHUB_ALLOWED_LOGINS", "andrewbolster"
+                ).split(",")
+                if entry.strip()
+            }
+        assert logins == {"alice", "bob"}
+
+    @pytest.mark.asyncio
+    async def test_server_info_requires_auth(self):
+        async with Client(mcp) as client:
+            with patch("app.get_access_token", return_value=None):
+                with pytest.raises(Exception, match="requires authentication"):
+                    await client.call_tool("get_server_info", {})
+
+    @pytest.mark.asyncio
+    async def test_server_info_rejects_unauthorised_user(self):
+        token = _mock_token("someoneelse")
+        async with Client(mcp) as client:
+            with patch("app.get_access_token", return_value=token):
+                with pytest.raises(Exception, match="not authorised"):
+                    await client.call_tool("get_server_info", {})
+
+    @pytest.mark.asyncio
+    async def test_server_info_succeeds_when_authenticated(self):
+        token = _mock_token("andrewbolster")
+        async with Client(mcp) as client:
+            with patch("app.get_access_token", return_value=token):
+                result = await client.call_tool("get_server_info", {})
+                assert "FastMCP version" in result.data
+                assert app.fastmcp.__version__ in result.data
+                assert "andrewbolster" in result.data
+
+    @pytest.mark.asyncio
+    async def test_cache_info_requires_auth(self):
+        async with Client(mcp) as client:
+            with patch("app.get_access_token", return_value=None):
+                with pytest.raises(Exception, match="requires authentication"):
+                    await client.call_tool("get_cache_info", {})
+
+    @pytest.mark.asyncio
+    async def test_cache_info_succeeds_when_authenticated(self):
+        token = _mock_token("andrewbolster")
+        async with Client(mcp) as client:
+            with patch("app.get_access_token", return_value=token):
+                result = await client.call_tool("get_cache_info", {})
+                assert "not authorised" not in result.data
 
 
 if __name__ == "__main__":
