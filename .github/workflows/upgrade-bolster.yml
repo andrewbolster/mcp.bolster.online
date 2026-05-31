@@ -1,0 +1,46 @@
+name: ⬆️ Upgrade bolster dependency
+
+on:
+  repository_dispatch:
+    types: [bolster-release]
+
+jobs:
+  upgrade:
+    name: Bump bolster to ${{ github.event.client_payload.version }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Upgrade bolster in lockfile
+        run: uv lock --upgrade-package bolster
+
+      - name: Check if lockfile changed
+        id: diff
+        run: |
+          if git diff --quiet uv.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create pull request
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: bump bolster to ${{ github.event.client_payload.version }}"
+          title: "chore: bump bolster to ${{ github.event.client_payload.version }}"
+          body: |
+            Automated dependency bump triggered by the bolster release.
+
+            **Release**: ${{ github.event.client_payload.release_url }}
+            **Version**: `${{ github.event.client_payload.version }}`
+
+            CI will run the full test suite including the bolster integration tests.
+            Merge once green.
+          branch: "deps/bolster-${{ github.event.client_payload.version }}"
+          labels: dependencies
