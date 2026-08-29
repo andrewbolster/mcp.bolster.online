@@ -43,7 +43,7 @@ deployment/
 ### `nginx/mcp.bolster.online`
 - **Purpose**: nginx virtual host configuration
 - **Features**:
-  - Reverse proxy for MCP server (port 8000)
+  - Reverse proxy for MCP server (port 9001)
   - Webhook endpoint routing (port 9000)
   - Security headers and rate limiting
   - GitHub IP allowlist for webhook endpoint
@@ -77,6 +77,51 @@ deployment/
 3. **Service Configuration**: Enable and start systemd services
 4. **Webhook Setup**: Configure GitHub webhook with matching secret
 5. **SSL Setup**: Configure SSL certificates with certbot (recommended)
+
+## Expected Drift on the Production Host
+
+`/opt/mcp.bolster.online` is a live git checkout owned by `www-data`, sitting on
+`main`. `git status` there is **never clean**, and most of that is by design. Check
+findings against this table before treating anything as an incident.
+
+Because the checkout is owned by `www-data`, git refuses to run as another user
+("dubious ownership"). Inspect without mutating global config:
+
+```bash
+git -c safe.directory=/opt/mcp.bolster.online -C /opt/mcp.bolster.online status
+```
+
+| Path | State | Why |
+| --- | --- | --- |
+| `deployment/webhook.json` | always modified | `deploy.sh` runs `git reset --hard origin/main`, which restores the `$WEBHOOK_SECRET` placeholder, then `sed`-injects the real secret back. The file is dirty from the moment a deploy finishes. **Never commit this diff.** |
+| `pyproject.toml`, `uv.lock` | modified | `bandit` and `safety` were added to dev deps on the host so `deploy.sh`'s security scan step could run. Not committed upstream, so every `git reset --hard` drops them. Fixing this means committing both to `[dependency-groups] dev`. |
+| `.venv/`, `.cache/`, `__pycache__/`, `.pytest_cache/`, `.coverage`, `.safety/` | untracked | `deploy.sh` builds the venv and runs the full test suite in place. Expected. |
+| `.local/` | untracked | `HOME=/opt/mcp.bolster.online` in the service unit, so tooling scribbles here. Harmless. |
+| `deployment/deploy.sh.bak` | untracked | Stale hand-edit backup predating the current `deploy.sh`. Safe to delete. |
+
+### Config linkage
+
+Most system config is symlinked back into this repo, so editing a file here and
+deploying updates the live system. Two exceptions matter:
+
+| System path | Linkage |
+| --- | --- |
+| `/etc/nginx/sites-available/mcp.bolster.online` | symlink → `deployment/nginx/mcp.bolster.online` |
+| `/etc/systemd/system/mcp-bolster.service` | symlink → `deployment/systemd/mcp-bolster.service` |
+| `/etc/systemd/system/mcp-webhook.service` | **copy**, not a symlink — currently byte-identical, but repo edits will not propagate |
+| `/etc/systemd/system/mcp-bolster.service.d/auth.conf` | host-only drop-in holding the GitHub OAuth client ID/secret and `GITHUB_ALLOWED_LOGINS`. Deliberately absent from the repo. |
+
+### Verifying the deployment is current
+
+```bash
+git -c safe.directory=/opt/mcp.bolster.online -C /opt/mcp.bolster.online \
+    rev-parse HEAD                      # should equal origin/main
+systemctl is-active mcp-bolster mcp-webhook
+ss -tlnp | grep -E ':9000|:9001'        # 9001 = MCP (localhost only), 9000 = webhook
+```
+
+A local clone that has not fetched will make the deployed SHA look unknown or
+divergent. Always `git fetch origin` before comparing.
 
 ## Security Features
 
@@ -132,7 +177,7 @@ sudo systemctl reload nginx
 1. **Permission Errors**: Ensure `www-data` can read repository files
 2. **Webhook Secret Mismatch**: Verify `WEBHOOK_SECRET` environment variable matches GitHub webhook secret
 3. **Environment Variable Missing**: Ensure `WEBHOOK_SECRET` is set before starting webhook service
-4. **Port Conflicts**: Ensure ports 8000 and 9000 are available
+4. **Port Conflicts**: Ensure ports 9001 and 9000 are available
 5. **SSL Certificate**: Use certbot for HTTPS setup
 
 ### Environment Variable Setup
