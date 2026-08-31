@@ -8,9 +8,49 @@ on:
   workflow_dispatch: # Manual trigger
 
 jobs:
+  # Prototype for a two-tier concurrency structure (see andrewbolster/bolster's
+  # pytest.yml — same problem, tested here first: this repo's matrix takes
+  # ~2min instead of ~20, so a bad iteration costs a couple of minutes to
+  # observe, not half an hour).
+  #
+  # A single shared concurrency group across all refs (queue: max) sounds
+  # like the fix for "only one PR's matrix runs at a time", but GitHub
+  # Actions has a platform behaviour that breaks it under rebase-style
+  # traffic: a fresh push to the SAME ref makes that ref's own already-queued
+  # entry in the group "lower priority" and cancels it on the spot, even
+  # though `queue: max` was meant to just order different refs relative to
+  # each other. If something keeps re-pushing a branch while it's waiting its
+  # turn (a rebase bot, for instance), that branch's queue entry keeps
+  # getting reset before it ever reaches the front — it can wait a long time
+  # and still never get a turn, because every reset makes it look like a
+  # brand-new low-priority entrant again.
+  #
+  # Splitting the "am I allowed to start" decision from the actual work
+  # avoids this: `queue` is a near-instant job holding one shared, global
+  # group (real cross-ref serialisation, FIFO via GitHub's built-in queueing)
+  # — cheap enough that a branch re-entering it after every rebase costs
+  # seconds, not the run's full duration. `test` itself keeps a separate,
+  # per-ref-and-matrix-cell group so a stale run for an old commit still
+  # gets cancelled immediately once it's actually running, same as before.
+  queue:
+    name: 🚦 Queue gate
+    runs-on: ubuntu-latest
+    concurrency:
+      group: mcp-bolster-test-queue
+      cancel-in-progress: false
+    steps:
+      - run: echo "cleared to run for ${{ github.sha }} on ${{ github.ref }}"
+
   test:
     name: 🐍 Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    needs: queue
     runs-on: ${{ matrix.os }}
+    # Matrix cell included so the 6 combinations still run in parallel with
+    # each other — only same-ref-same-cell reruns (a new push superseding an
+    # old one) should cancel anything here.
+    concurrency:
+      group: mcp-bolster-test-${{ github.ref }}-${{ matrix.os }}-${{ matrix.python-version }}
+      cancel-in-progress: true
     timeout-minutes: 15  # Reduced timeout for core platforms
     strategy:
       fail-fast: false
