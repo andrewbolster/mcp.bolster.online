@@ -27,6 +27,11 @@ jobs:
             version_bump: ${{ inputs.version_bump || 'auto' }}
             block_minor: false
             package_name: mcp-bolster-online
+        # release-logic.yml auto-merges patch-bump PRs using BOLSTER_TOKEN
+        # (andrewbolster/bolster#2087) — a named secret on a cross-repo
+        # reusable-workflow call isn't visible on the other side without
+        # this, even though both repos are public.
+        secrets: inherit
         permissions:
             contents: write
             pull-requests: write
