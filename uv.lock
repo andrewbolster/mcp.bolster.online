@@ -142,7 +142,7 @@ wheels = [
 
 [[package]]
 name = "bolster"
-version = "0.6.0"
+version = "0.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -154,6 +154,7 @@ dependencies = [
     { name = "import-linter" },
     { name = "lxml" },
     { name = "numpy" },
+    { name = "odfpy" },
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "pillow" },
@@ -166,12 +167,11 @@ dependencies = [
     { name = "scipy" },
     { name = "tqdm" },
     { name = "urllib3" },
-    { name = "waybackpy" },
     { name = "xlrd" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3b/d3/085d009914cbcf9050547ebfd33d1f36ca0db0c681cadc7879629bffecfb/bolster-0.6.0.tar.gz", hash = "sha256:e319f3b9f89c8cb47baf7da7e0e861bdcc3461887ec7037f94728849d1039bb1", size = 240955, upload-time = "2026-05-23T14:37:04.234Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/72/180524e611d15945ccb8225e23adc837984d58d507089b239581f019f50c/bolster-0.7.1.tar.gz", hash = "sha256:f2e8c861fb771c915144dfb2c97de18dd6f9bf584e612a91ecc660b2d17b9f9e", size = 460502, upload-time = "2026-08-31T15:07:25.412Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/03/9b/0d8cb367bf6859f746cd917ad78cd1d1c2930568e2484e6173c27ab80a56/bolster-0.6.0-py3-none-any.whl", hash = "sha256:861de15b6d85ab3332fb5c8f3952ff348e4ae3d9cc893c22baf15bba4ce33d6a", size = 287313, upload-time = "2026-05-23T14:37:02.637Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/7b/4c74cf965e9b9015aa7c5ca3c5b5f41db5fb42545651e6c54c14d6c7fd9f/bolster-0.7.1-py3-none-any.whl", hash = "sha256:601580319e44de683e6b8f6f564c517b92e689b1a1d379f438ce9dbd4fb9871b", size = 561453, upload-time = "2026-08-31T15:07:23.934Z" },
 ]
 
 [[package]]
@@ -691,6 +691,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/46/2d/a0ccdb78788064fa0dc901b8524e50615c42be1d78b78d646d0b28d09180/dateparser-1.4.0.tar.gz", hash = "sha256:97a21840d5ecdf7630c584f673338a5afac5dfe84f647baf4d7e8df98f9354a4", size = 321512, upload-time = "2026-03-26T09:56:10.292Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b4/0b/3c3bb7cbe757279e693a0be6049048012f794d01f81099609ecd53b899f0/dateparser-1.4.0-py3-none-any.whl", hash = "sha256:7902b8e85d603494bf70a5a0b1decdddb2270b9c6e6b2bc8a57b93476c0df378", size = 300379, upload-time = "2026-03-26T09:56:08.409Z" },
+]
+
+[[package]]
+name = "defusedxml"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124974bfe172b4daf3c984ebd9c2a06e2b8a4dc7331c72/defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69", size = 75520, upload-time = "2021-03-08T10:59:26.269Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61", size = 25604, upload-time = "2021-03-08T10:59:24.45Z" },
 ]
 
 [[package]]
@@ -1602,6 +1611,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/1a/b0/413077f6b1153ed3cba361401c6783bbad6114804a000cc22eb71c13e190/numpy-2.4.6-pp311-pypy311_pp73-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8ad03c0965fb3c692200e74d458ca28c1dbb4ce96f9a479a8aa041ad5fabca02", size = 16747286, upload-time = "2026-05-18T23:37:06.327Z" },
     { url = "https://files.pythonhosted.org/packages/15/ce/e5ec180bc41812edcd8daeb8639d205622c0e8c02259d8ab25a0201b3c2a/numpy-2.4.6-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:2803abfebfc990042cd494d8ce2d5f82e9d847af6d35ec486923aa19dbad5e73", size = 12504263, upload-time = "2026-05-18T23:37:09.715Z" },
 ]
+
+[[package]]
+name = "odfpy"
+version = "1.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "defusedxml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/97/73/8ade73f6749177003f7ce3304f524774adda96e6aaab30ea79fd8fda7934/odfpy-1.4.1.tar.gz", hash = "sha256:db766a6e59c5103212f3cc92ec8dd50a0f3a02790233ed0b52148b70d3c438ec", size = 717045, upload-time = "2020-01-18T16:55:48.852Z" }
 
 [[package]]
 name = "openapi-pydantic"
@@ -3092,20 +3110,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/27/0b/a54103cfd732bb703c7a749222011a0483ef3705948dae3b203158601119/watchfiles-1.2.0-pp311-pypy311_pp73-macosx_11_0_arm64.whl", hash = "sha256:094b9b70103d4e963499bdea001ee3c2697b144cd9ae6218a62c0f89ec9e31db", size = 396629, upload-time = "2026-05-18T04:32:03.268Z" },
     { url = "https://files.pythonhosted.org/packages/5e/2c/73f31a3b893886206c3f54d73e8ad8dee58cdb2f69ad2622e0a8a9e07f4e/watchfiles-1.2.0-pp311-pypy311_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b0ef001f8c25ad0fa9529f914c1600647ecd0f542d11c19b7894768c67b6acb7", size = 457318, upload-time = "2026-05-18T04:31:01.932Z" },
     { url = "https://files.pythonhosted.org/packages/e9/f9/45d021e4a5cc7b9dd567f7cbb06d3b75f751a690063fb6cc7ec60f4e46b7/watchfiles-1.2.0-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a88fc94e647bc4eec523f1caa540258eb71d14278b9daf72fa1e2658a98df0f0", size = 457771, upload-time = "2026-05-18T04:30:56.331Z" },
-]
-
-[[package]]
-name = "waybackpy"
-version = "3.0.6"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click" },
-    { name = "requests" },
-    { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/34/ab/90085feb81e7fad7d00c736f98e74ec315159ebef2180a77c85a06b2f0aa/waybackpy-3.0.6.tar.gz", hash = "sha256:497a371756aba7644eb7ada0ebd4edb15cb8c53bc134cc973bf023a12caff83f", size = 29928, upload-time = "2022-03-15T15:12:02.932Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/10/55/573692440ce73f08200f4b6d3e193fa6426d1cb460912a472b8c3db137e2/waybackpy-3.0.6-py3-none-any.whl", hash = "sha256:c568b0db9056fbe42a1a7e56b4f1d1919bd3f76bd62da58d9ee2e577297be284", size = 34911, upload-time = "2022-03-15T15:12:00.652Z" },
 ]
 
 [[package]]
