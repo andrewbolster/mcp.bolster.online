@@ -100,7 +100,7 @@ This also follows from how the service is sandboxed (`ProtectHome=true`, `Protec
 | `GITHUB_CLIENT_ID` | GitHub OAuth App client ID, backs the `/auth/mcp` login flow | Yes, for `/auth/mcp` |
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth App client secret | Yes, for `/auth/mcp` |
 | `GITHUB_ALLOWED_LOGINS` | Comma-separated GitHub usernames allowed to authenticate at all. Empty/unset fails closed (nobody can log in), not open | Yes, for `/auth/mcp` |
-| `CALENDARS_CONFIG_JSON` | Calendar feeds for the availability tool (see below) | No — tool degrades to "not configured" without it |
+| `CALENDARS_CONFIG_JSON_B64` | Base64-encoded calendar feeds for the availability tool (see below) | No — tool degrades to "not configured" without it |
 
 ### Setting a secret in production
 
@@ -115,7 +115,7 @@ This opens an editor for the override file. Add the variables you need under `[S
 Environment=GITHUB_CLIENT_ID=your-client-id
 Environment=GITHUB_CLIENT_SECRET=your-client-secret
 Environment=GITHUB_ALLOWED_LOGINS=andrewbolster
-Environment=CALENDARS_CONFIG_JSON={"calendars":[{"name":"work","url":"https://..."},{"name":"personal","url":"https://..."}]}
+Environment=CALENDARS_CONFIG_JSON_B64=eyJjYWxlbmRhcnMiOiBb...
 ```
 
 Then apply it:
@@ -127,9 +127,20 @@ sudo systemctl restart mcp-bolster
 
 `systemctl edit` is the point of this whole approach: the override file lives under `/etc/systemd/system/`, is never part of the git checkout at `/opt/mcp.bolster.online`, and survives every `git reset --hard` the deploy script does. Nobody needs to remember not to commit it — it structurally can't be, because it's never inside the repository in the first place.
 
-### `CALENDARS_CONFIG_JSON` schema
+### `CALENDARS_CONFIG_JSON_B64` schema
 
-A single environment variable holding a JSON object:
+**This one has to be base64, not raw JSON — and it's not optional polish.** systemd's `Environment=` directive applies shell-like quote parsing to its values: it strips any `"` character it finds *anywhere* in the string, not just at the edges, and separately treats `%` as the start of a specifier (`%h`, `%H`, etc. — real Google Calendar URLs contain literal `%40`). Both silently corrupt a raw JSON value — no error, no warning in the unit file, just a stripped-down invalid string reaching the process (or the whole `Environment=` line silently dropped if a `%`-specifier fails to resolve). Base64's alphabet contains neither character, so it passes through untouched. Generate it with:
+
+```bash
+python3 -c 'import json,base64; print(base64.b64encode(json.dumps({
+  "calendars": [
+    {"name": "work", "url": "https://outlook.office365.com/owa/calendar/REDACTED/calendar.ics"},
+    {"name": "personal", "url": "https://calendar.google.com/calendar/ical/REDACTED/private-REDACTED/basic.ics"}
+  ]
+}).encode()).decode())'
+```
+
+The decoded JSON shape:
 
 ```json
 {
@@ -143,14 +154,14 @@ A single environment variable holding a JSON object:
 - `name` is a free-text label. It's shown to the calendar owner (Andrew, authenticated) alongside each busy block, and never shown to anyone else — so it can be anything meaningful to you, it doesn't need to hide anything.
 - `url` is the private/secret ICS feed URL for that calendar (Google's "Secret address in iCal format", Outlook's private calendar sharing link, etc.). Anyone with this URL can read the calendar directly, so treat it exactly like a password — this is the actual secret, not the JSON structure around it.
 - The tool never echoes these URLs back in any response, to either the owner or anonymous callers — only computed busy/tentative time ranges (plus, for the owner, the `name` label and event titles) ever leave the server.
-- Missing or malformed `CALENDARS_CONFIG_JSON` doesn't crash the server; `check_availability` just reports that availability checking isn't configured.
+- Missing, non-base64, or base64-that-doesn't-decode-to-valid-JSON doesn't crash the server; `check_availability` just reports that availability checking isn't configured.
 
 ### Local development
 
-For local testing, export the same variable in your own shell before running the server — never in a file this repo's `.gitignore` would need to know about, because there isn't one:
+For local testing, export the same variable in your own shell before running the server — never in a file this repo's `.gitignore` would need to know about, because there isn't one. Plain shell `export` doesn't have systemd's quote-stripping problem, but base64 is still the one supported format (keeping local and production identical is worth more than saving one encode step):
 
 ```bash
-export CALENDARS_CONFIG_JSON='{"calendars":[{"name":"test","url":"https://..."}]}'
+export CALENDARS_CONFIG_JSON_B64=$(python3 -c 'import json,base64; print(base64.b64encode(json.dumps({"calendars":[{"name":"test","url":"https://..."}]}).encode()).decode())')
 uv run python app.py
 ```
 
@@ -158,7 +169,7 @@ If you'd rather not have real calendar URLs sitting in your shell history, sourc
 
 ```bash
 # ~/.config/bolster/mcp-env.sh — not tracked anywhere, chmod 600
-export CALENDARS_CONFIG_JSON='{"calendars": [...]}'
+export CALENDARS_CONFIG_JSON_B64=eyJjYWxlbmRhcnMiOiBb...
 ```
 
 ```bash

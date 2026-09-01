@@ -1,15 +1,21 @@
 """Merged free/busy availability across multiple private ICS calendar feeds.
 
 Calendar URLs are never stored in this repo. They're read from the
-CALENDARS_CONFIG_JSON environment variable — the same convention this
-project already uses for GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET — so
-provisioning them follows the same systemd-override path in production.
-See README.md's "Configuration & Secrets" section for the schema and how
-to set it.
+CALENDARS_CONFIG_JSON_B64 environment variable — base64-encoded, not raw
+JSON. systemd's `Environment=` directive applies shell-like quote parsing
+to its values and strips any `"` character it finds *anywhere* in the
+string, not just at the edges — which silently corrupts raw JSON (all of
+it, since every `"key":"value"` pair looks like a quoted token to it).
+Base64's alphabet contains no `"`, `%`, or whitespace, so it round-trips
+through `Environment=` (and its `%`-specifier expansion) intact. See
+README.md's "Configuration & Secrets" section for the schema and how to
+set it.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 from dataclasses import dataclass
@@ -20,7 +26,7 @@ import httpx
 import recurring_ical_events
 from icalendar import Calendar
 
-CALENDARS_ENV_VAR = "CALENDARS_CONFIG_JSON"
+CALENDARS_ENV_VAR = "CALENDARS_CONFIG_JSON_B64"
 
 # Severity order: higher wins when calendars overlap for the same time slot.
 FREE, TENTATIVE, BUSY = 0, 1, 2
@@ -28,7 +34,7 @@ SEVERITY_LABEL = {FREE: "free", TENTATIVE: "tentative", BUSY: "busy"}
 
 
 class AvailabilityNotConfiguredError(Exception):
-    """CALENDARS_CONFIG_JSON is unset or empty on this deployment."""
+    """CALENDARS_CONFIG_JSON_B64 is unset or empty on this deployment."""
 
 
 @dataclass
@@ -41,21 +47,23 @@ class Interval:
 
 
 def load_calendars() -> list[dict[str, str]]:
-    """Load calendar name/url pairs from CALENDARS_CONFIG_JSON.
+    """Load calendar name/url pairs from CALENDARS_CONFIG_JSON_B64.
 
     Raises:
-        AvailabilityNotConfiguredError: if the env var is unset, empty, or
-            doesn't parse to the expected {"calendars": [...]} shape.
+        AvailabilityNotConfiguredError: if the env var is unset, empty, not
+            valid base64, or doesn't decode to the expected
+            {"calendars": [...]} shape.
     """
     raw = os.environ.get(CALENDARS_ENV_VAR, "")
     if not raw.strip():
         raise AvailabilityNotConfiguredError(f"{CALENDARS_ENV_VAR} is not set")
     try:
-        data = json.loads(raw)
+        decoded = base64.b64decode(raw, validate=True).decode("utf-8")
+        data = json.loads(decoded)
         calendars = data["calendars"]
         if not calendars:
             raise ValueError("calendars list is empty")
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
         raise AvailabilityNotConfiguredError(f"{CALENDARS_ENV_VAR} is malformed: {e}") from e
     return calendars
 

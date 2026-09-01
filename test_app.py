@@ -5,6 +5,7 @@ Test suite for Andrew Bolster MCP Resources Server
 Tests both resources and tools using FastMCP in-memory testing patterns.
 """
 
+import base64
 import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -163,10 +164,15 @@ def make_ics_client_mock(ics_bodies: dict[str, str]) -> AsyncMock:
     return mock_client
 
 
+def _b64_calendars_json(payload: dict) -> str:
+    """Base64-encode a {"calendars": [...]} config, matching production's CALENDARS_CONFIG_JSON_B64."""
+    return base64.b64encode(json.dumps(payload).encode()).decode()
+
+
 class TestAvailabilityTool:
     """check_availability's two response tiers: owner (detailed) vs everyone else (free/busy only)."""
 
-    CALENDARS_JSON = json.dumps({"calendars": [{"name": "work", "url": "https://example.com/work.ics"}]})
+    CALENDARS_JSON = _b64_calendars_json({"calendars": [{"name": "work", "url": "https://example.com/work.ics"}]})
 
     EMPTY_ICAL = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR"
 
@@ -179,14 +185,14 @@ class TestAvailabilityTool:
 
     @pytest.mark.asyncio
     async def test_not_configured(self, monkeypatch):
-        monkeypatch.delenv("CALENDARS_CONFIG_JSON", raising=False)
+        monkeypatch.delenv(availability.CALENDARS_ENV_VAR, raising=False)
         async with Client(mcp) as client:
             result = await client.call_tool("check_availability", {})
             assert "isn't configured" in result.data
 
     @pytest.mark.asyncio
     async def test_anonymous_sees_free_busy_only(self, monkeypatch):
-        monkeypatch.setenv("CALENDARS_CONFIG_JSON", self.CALENDARS_JSON)
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
         with patch("availability.httpx.AsyncClient") as mock_client_cls:
             mock_client_cls.return_value = make_ics_client_mock({"https://example.com/work.ics": self.BUSY_ICAL})
             async with Client(mcp) as client:
@@ -198,7 +204,7 @@ class TestAvailabilityTool:
 
     @pytest.mark.asyncio
     async def test_owner_sees_calendar_and_summary(self, monkeypatch):
-        monkeypatch.setenv("CALENDARS_CONFIG_JSON", self.CALENDARS_JSON)
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
         monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
         token = auth_context_var.set(fake_login("andrewbolster"))
         try:
@@ -213,7 +219,7 @@ class TestAvailabilityTool:
 
     @pytest.mark.asyncio
     async def test_no_busy_time_found(self, monkeypatch):
-        monkeypatch.setenv("CALENDARS_CONFIG_JSON", self.CALENDARS_JSON)
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
         with patch("availability.httpx.AsyncClient") as mock_client_cls:
             mock_client_cls.return_value = make_ics_client_mock({"https://example.com/work.ics": self.EMPTY_ICAL})
             async with Client(mcp) as client:
@@ -222,7 +228,7 @@ class TestAvailabilityTool:
 
     @pytest.mark.asyncio
     async def test_default_parameters(self, monkeypatch):
-        monkeypatch.setenv("CALENDARS_CONFIG_JSON", self.CALENDARS_JSON)
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
         with patch("availability.httpx.AsyncClient") as mock_client_cls:
             mock_client_cls.return_value = make_ics_client_mock({"https://example.com/work.ics": self.EMPTY_ICAL})
             async with Client(mcp) as client:
@@ -231,7 +237,7 @@ class TestAvailabilityTool:
 
     @pytest.mark.asyncio
     async def test_http_error_from_one_calendar_does_not_crash_the_tool(self, monkeypatch):
-        monkeypatch.setenv("CALENDARS_CONFIG_JSON", self.CALENDARS_JSON)
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
@@ -251,7 +257,7 @@ class TestAvailabilityTool:
             "SUMMARY:Conference Day\r\nEND:VEVENT\r\n"
             "END:VCALENDAR"
         )
-        monkeypatch.setenv("CALENDARS_CONFIG_JSON", self.CALENDARS_JSON)
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
         monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
         token = auth_context_var.set(fake_login("andrewbolster"))
         try:
@@ -420,8 +426,8 @@ class TestIntegration:
 <rss version="2.0"><channel></channel></rss>"""
         )
         monkeypatch.setenv(
-            "CALENDARS_CONFIG_JSON",
-            json.dumps({"calendars": [{"name": "work", "url": "https://example.com/work.ics"}]}),
+            availability.CALENDARS_ENV_VAR,
+            _b64_calendars_json({"calendars": [{"name": "work", "url": "https://example.com/work.ics"}]}),
         )
 
         async with Client(mcp) as client:
@@ -581,19 +587,25 @@ class TestAvailabilityModule:
         with pytest.raises(availability.AvailabilityNotConfiguredError):
             availability.load_calendars()
 
-    def test_load_calendars_malformed_json(self, monkeypatch):
-        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, "{not valid json")
+    def test_load_calendars_not_valid_base64(self, monkeypatch):
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, "{not valid base64!!")
+        with pytest.raises(availability.AvailabilityNotConfiguredError):
+            availability.load_calendars()
+
+    def test_load_calendars_valid_base64_but_invalid_json(self, monkeypatch):
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, base64.b64encode(b"not json").decode())
         with pytest.raises(availability.AvailabilityNotConfiguredError):
             availability.load_calendars()
 
     def test_load_calendars_empty_list(self, monkeypatch):
-        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, json.dumps({"calendars": []}))
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, _b64_calendars_json({"calendars": []}))
         with pytest.raises(availability.AvailabilityNotConfiguredError):
             availability.load_calendars()
 
     def test_load_calendars_valid(self, monkeypatch):
         monkeypatch.setenv(
-            availability.CALENDARS_ENV_VAR, json.dumps({"calendars": [{"name": "work", "url": "https://x/y.ics"}]})
+            availability.CALENDARS_ENV_VAR,
+            _b64_calendars_json({"calendars": [{"name": "work", "url": "https://x/y.ics"}]}),
         )
         assert availability.load_calendars() == [{"name": "work", "url": "https://x/y.ics"}]
 
