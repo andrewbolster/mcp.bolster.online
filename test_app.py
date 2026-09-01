@@ -497,8 +497,9 @@ class TestIntegration:
 
 
 class TestAuthMount:
-    """mcp_auth must expose the same tools as mcp, live via mount(), and gate
-    them on GITHUB_ALLOWED_LOGINS rather than on GitHub identity alone."""
+    """mcp_auth must expose every tool the public mcp does, live via mount(),
+    plus its own auth-scoped tools (e.g. whoami), gated on
+    GITHUB_ALLOWED_LOGINS rather than on GitHub identity alone."""
 
     @pytest.mark.asyncio
     async def test_mounts_the_same_tools_as_the_public_server(self, monkeypatch):
@@ -508,7 +509,11 @@ class TestAuthMount:
             async with Client(mcp) as public_client, Client(mcp_auth) as auth_client:
                 public_names = {t.name for t in await public_client.list_tools()}
                 auth_names = {t.name for t in await auth_client.list_tools()}
-            assert auth_names == public_names
+            assert public_names <= auth_names, "mounted tools must all still be present"
+            assert "whoami" in auth_names
+            assert "whoami" not in public_names, (
+                "auth-scoped tools stay off the public server"
+            )
             assert "send_contact_message" in auth_names
         finally:
             auth_context_var.reset(token)
@@ -553,6 +558,17 @@ class TestAuthMount:
         try:
             async with Client(mcp_auth) as client:
                 assert await client.list_tools() == []
+        finally:
+            auth_context_var.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_whoami_reports_the_authenticated_login(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        token = auth_context_var.set(fake_login("andrewbolster"))
+        try:
+            async with Client(mcp_auth) as client:
+                result = await client.call_tool("whoami", {})
+                assert "andrewbolster" in result.data
         finally:
             auth_context_var.reset(token)
 

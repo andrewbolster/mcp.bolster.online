@@ -18,6 +18,7 @@ from defusedxml import (
 )
 from fastmcp import Context, FastMCP
 from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.middleware import AuthMiddleware
 from fastmcp.server.middleware.authorization import AuthContext
 from fastmcp.tools.tool import ToolAnnotations
@@ -525,6 +526,18 @@ mcp_auth = FastMCP(
     middleware=[AuthMiddleware(auth=require_allowed_login)],
 )
 mcp_auth.mount(mcp, namespace=None)
+
+
+@mcp_auth.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def whoami() -> str:
+    """Report the authenticated GitHub identity making this request."""
+    token = get_access_token()
+    if token is None:
+        return "Not authenticated."
+    login = token.claims.get("login", "unknown")
+    name = token.claims.get("name")
+    return f"Signed in as {login}" + (f" ({name})" if name else "")
+
 
 # Deployed via uvicorn (`uvicorn app:app`), not `fastmcp run`, since the
 # latter only knows how to serve a single bare FastMCP object and this repo
