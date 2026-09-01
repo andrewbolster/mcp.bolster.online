@@ -9,8 +9,8 @@ a Northern Ireland-based technology researcher, data scientist, and community bu
 import contextlib
 import os
 import re
-from datetime import datetime, timedelta
-from typing import Annotated, Any
+from datetime import datetime
+from typing import Annotated
 
 import httpx
 from defusedxml import (
@@ -26,6 +26,8 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware as StarletteMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
+
+from availability import AvailabilityNotConfiguredError, get_availability
 
 # Initialize the MCP server
 mcp = FastMCP(
@@ -290,103 +292,35 @@ async def check_availability(
     start_date: Annotated[str | None, "Start date in YYYY-MM-DD format (defaults to today)"] = None,
     days_ahead: Annotated[int, "Number of days to check ahead"] = 7,
 ) -> str:
-    """Check Andrew Bolster's calendar availability using his public iCal feed."""
+    """Check Andrew Bolster's availability, merged across his calendars.
+
+    Callers authenticated via /auth/mcp see which calendar and event title
+    is behind each busy/tentative block. Everyone else — including
+    anonymous callers on the public /mcp endpoint — sees only plain
+    free/busy/tentative time ranges, with no calendar source or event
+    content.
+    """
+    token = get_access_token()
+    # This tool is mounted on both mcp (public, no auth) and mcp_auth
+    # (GitHub-authenticated, gated by require_allowed_login on
+    # GITHUB_ALLOWED_LOGINS). A non-None token here means AuthMiddleware
+    # already confirmed the caller's login is on that allowlist before this
+    # tool ever ran — no need to re-check the login against anything.
+    is_owner = token is not None
+
+    await ctx.info(f"Checking availability from {start_date or 'today'} for {days_ahead} days (detailed={is_owner})")
+
     try:
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else datetime.now()
-
-        end_dt = start_dt + timedelta(days=days_ahead)
-        await ctx.info(f"Checking availability from {start_dt.date()} for {days_ahead} days")
-
-        ical_url = "https://calendar.google.com/calendar/ical/andrew.bolster%40gmail.com/public/basic.ics"
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(ical_url)
-            response.raise_for_status()
-
-        ical_content = response.text
-        events: list[dict[str, Any]] = []
-        current_event: dict[str, Any] = {}
-
-        for line in ical_content.split("\n"):
-            line = line.strip()
-            if line == "BEGIN:VEVENT":
-                current_event = {}
-            elif line == "END:VEVENT":
-                if current_event:
-                    events.append(current_event.copy())
-                current_event = {}
-            elif line.startswith("DTSTART"):
-                dt_match = re.search(r"DTSTART[^:]*:(\d{8}T?\d{0,6}Z?)", line)
-                if dt_match:
-                    dt_str = dt_match.group(1)
-                    try:
-                        if "T" in dt_str:
-                            if dt_str.endswith("Z"):
-                                dt = datetime.strptime(dt_str, "%Y%m%dT%H%M%SZ")
-                            else:
-                                dt = datetime.strptime(dt_str, "%Y%m%dT%H%M%S")
-                        else:
-                            dt = datetime.strptime(dt_str, "%Y%m%d")
-                        current_event["start"] = dt
-                    except ValueError:
-                        pass
-            elif line.startswith("DTEND"):
-                dt_match = re.search(r"DTEND[^:]*:(\d{8}T?\d{0,6}Z?)", line)
-                if dt_match:
-                    dt_str = dt_match.group(1)
-                    try:
-                        if "T" in dt_str:
-                            if dt_str.endswith("Z"):
-                                dt = datetime.strptime(dt_str, "%Y%m%dT%H%M%SZ")
-                            else:
-                                dt = datetime.strptime(dt_str, "%Y%m%dT%H%M%S")
-                        else:
-                            dt = datetime.strptime(dt_str, "%Y%m%d")
-                        current_event["end"] = dt
-                    except ValueError:
-                        pass
-            elif line.startswith("SUMMARY"):
-                current_event["summary"] = line.split(":", 1)[1] if ":" in line else ""
-
-        relevant_events = [
-            event
-            for event in events
-            if "start" in event
-            and "end" in event
-            and isinstance(event["start"], datetime)
-            and isinstance(event["end"], datetime)
-            and event["start"] <= end_dt
-            and event["end"] >= start_dt
-        ]
-
-        await ctx.info(f"Found {len(relevant_events)} events in range")
-
-        if not relevant_events:
-            return f"""Calendar availability for {start_dt.strftime("%Y-%m-%d")} to {end_dt.strftime("%Y-%m-%d")}:
-
-✅ No scheduled events found in the public calendar for this period.
-
-Note: This shows only publicly visible calendar events. Private events and detailed scheduling should be confirmed directly."""
-
-        event_list = []
-        for event in sorted(relevant_events, key=lambda x: x["start"]):
-            start_str = event["start"].strftime("%Y-%m-%d %H:%M")
-            end_str = event["end"].strftime("%Y-%m-%d %H:%M")
-            summary = event.get("summary", "Busy")
-            event_list.append(f"  📅 {start_str} - {end_str}: {summary}")
-
-        return f"""Calendar availability for {start_dt.strftime("%Y-%m-%d")} to {end_dt.strftime("%Y-%m-%d")}:
-
-⚠️  Scheduled events found:
-{chr(10).join(event_list)}
-
-Note: This shows only publicly visible calendar events. For detailed scheduling or to check additional availability, please use the contact tool to reach out directly."""
-
+        return await get_availability(start_date=start_date, days_ahead=days_ahead, detailed=is_owner)
+    except AvailabilityNotConfiguredError as e:
+        await ctx.warning(f"Availability not configured: {e}")
+        return "Availability checking isn't configured on this server yet. Please contact directly."
     except httpx.HTTPError as e:
         await ctx.warning(f"HTTP error fetching calendar: {e}")
-        return f"Error fetching calendar data: {str(e)}. Please try again later or contact directly."
+        return f"Error fetching calendar data: {e}. Please try again later or contact directly."
     except Exception as e:
         await ctx.warning(f"Unexpected error in check_availability: {e}")
-        return f"Error processing calendar information: {str(e)}. Please contact directly for availability."
+        return f"Error processing calendar information: {e}. Please contact directly for availability."
 
 
 class BlogPost(dict):  # type: ignore[type-arg]

@@ -34,7 +34,7 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 ### MCP Tools
 
 - **Contact Tool** - Send professional inquiries (placeholder implementation)
-- **Availability Tool** - Check calendar availability via public iCal feed
+- **Availability Tool** - Merged free/busy across multiple private calendars, with two response tiers: full detail (which calendar, event title) for Andrew, authenticated via `/auth/mcp`; free/busy-only for everyone else, including anonymous callers on the public `/mcp` endpoint
 - **Blog Posts Tool** - Fetch recent posts from RSS feed
 
 ### Development Features
@@ -87,6 +87,83 @@ uv run pre-commit install
 
 # Run pre-commit on all files
 uv run pre-commit run --all-files
+```
+
+## 🔐 Configuration & Secrets
+
+None of this server's secrets live in this repository — not in a `.env` file, not in `deployment/`, not anywhere git-tracked. Every value below is an **environment variable**, set on the production host via a systemd drop-in override (`sudo systemctl edit mcp-bolster`, which writes to `/etc/systemd/system/mcp-bolster.service.d/override.conf` — a file outside this repo, untouched by `git reset --hard` on every deploy). `deployment/systemd/mcp-bolster.service` intentionally has no `Environment=` lines for any of these, for the same reason: whatever's tracked in git is, by definition, not a place to put a secret.
+
+This also follows from how the service is sandboxed (`ProtectHome=true`, `ProtectSystem=strict`, `ReadWritePaths=/opt/mcp.bolster.online` only, `HOME=/opt/mcp.bolster.online`) — the process can't read a config file under a real user's home directory even if you wanted it to, so environment variables are the only mechanism these secrets *can* use, not just the preferred one.
+
+| Variable | Purpose | Required |
+|---|---|---|
+| `GITHUB_CLIENT_ID` | GitHub OAuth App client ID, backs the `/auth/mcp` login flow | Yes, for `/auth/mcp` |
+| `GITHUB_CLIENT_SECRET` | GitHub OAuth App client secret | Yes, for `/auth/mcp` |
+| `GITHUB_ALLOWED_LOGINS` | Comma-separated GitHub usernames allowed to authenticate at all. Empty/unset fails closed (nobody can log in), not open | Yes, for `/auth/mcp` |
+| `CALENDARS_CONFIG_JSON` | Calendar feeds for the availability tool (see below) | No — tool degrades to "not configured" without it |
+
+### Setting a secret in production
+
+```bash
+sudo systemctl edit mcp-bolster
+```
+
+This opens an editor for the override file. Add the variables you need under `[Service]`:
+
+```ini
+[Service]
+Environment=GITHUB_CLIENT_ID=your-client-id
+Environment=GITHUB_CLIENT_SECRET=your-client-secret
+Environment=GITHUB_ALLOWED_LOGINS=andrewbolster
+Environment=CALENDARS_CONFIG_JSON={"calendars":[{"name":"work","url":"https://..."},{"name":"personal","url":"https://..."}]}
+```
+
+Then apply it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart mcp-bolster
+```
+
+`systemctl edit` is the point of this whole approach: the override file lives under `/etc/systemd/system/`, is never part of the git checkout at `/opt/mcp.bolster.online`, and survives every `git reset --hard` the deploy script does. Nobody needs to remember not to commit it — it structurally can't be, because it's never inside the repository in the first place.
+
+### `CALENDARS_CONFIG_JSON` schema
+
+A single environment variable holding a JSON object:
+
+```json
+{
+  "calendars": [
+    {"name": "work", "url": "https://outlook.office365.com/owa/calendar/REDACTED/calendar.ics"},
+    {"name": "personal", "url": "https://calendar.google.com/calendar/ical/REDACTED/private-REDACTED/basic.ics"}
+  ]
+}
+```
+
+- `name` is a free-text label. It's shown to the calendar owner (Andrew, authenticated) alongside each busy block, and never shown to anyone else — so it can be anything meaningful to you, it doesn't need to hide anything.
+- `url` is the private/secret ICS feed URL for that calendar (Google's "Secret address in iCal format", Outlook's private calendar sharing link, etc.). Anyone with this URL can read the calendar directly, so treat it exactly like a password — this is the actual secret, not the JSON structure around it.
+- The tool never echoes these URLs back in any response, to either the owner or anonymous callers — only computed busy/tentative time ranges (plus, for the owner, the `name` label and event titles) ever leave the server.
+- Missing or malformed `CALENDARS_CONFIG_JSON` doesn't crash the server; `check_availability` just reports that availability checking isn't configured.
+
+### Local development
+
+For local testing, export the same variable in your own shell before running the server — never in a file this repo's `.gitignore` would need to know about, because there isn't one:
+
+```bash
+export CALENDARS_CONFIG_JSON='{"calendars":[{"name":"test","url":"https://..."}]}'
+uv run python app.py
+```
+
+If you'd rather not have real calendar URLs sitting in your shell history, source them from a file kept outside any repository (e.g. `~/.config/bolster/mcp-env.sh`, `chmod 600`) instead of typing `export` interactively:
+
+```bash
+# ~/.config/bolster/mcp-env.sh — not tracked anywhere, chmod 600
+export CALENDARS_CONFIG_JSON='{"calendars": [...]}'
+```
+
+```bash
+source ~/.config/bolster/mcp-env.sh
+uv run python app.py
 ```
 
 ## 🚀 Deployment
