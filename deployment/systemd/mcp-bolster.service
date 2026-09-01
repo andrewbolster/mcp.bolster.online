@@ -17,7 +17,11 @@ Environment=PATH=/opt/mcp.bolster.online/.venv/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=/opt/mcp.bolster.online
 
 # Command to start the service
-ExecStart=/opt/mcp.bolster.online/.venv/bin/fastmcp run app.py:mcp --transport=http --port 9001
+# uvicorn, not `fastmcp run` — the latter only serves a single bare FastMCP
+# object, but app.py now composes two (public /mcp, GitHub-authenticated
+# /auth/mcp) under one Starlette app. Requires `sudo systemctl daemon-reload`
+# once after this line changes; deploy.sh does not do this automatically.
+ExecStart=/opt/mcp.bolster.online/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 9001
 ExecReload=/bin/kill -HUP $MAINPID
 
 # Restart configuration

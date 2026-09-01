@@ -12,8 +12,27 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from fastmcp import Client
+from fastmcp.server.auth.auth import AccessToken
+from mcp.server.auth.middleware.auth_context import auth_context_var
+from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 
-from app import mcp
+from app import mcp, mcp_auth
+
+
+def fake_login(login: str) -> AuthenticatedUser:
+    """Simulate a verified GitHub session carrying the given login.
+
+    Mirrors what GitHubTokenVerifier produces from a real OAuth token: an
+    AuthenticatedUser wrapping an AccessToken whose claims include "login".
+    Setting this on auth_context_var (the same ContextVar the MCP SDK's own
+    auth middleware populates from a real bearer token) lets AuthMiddleware
+    see an authenticated caller without driving a real OAuth round trip.
+    """
+    return AuthenticatedUser(
+        AccessToken(
+            token="test-token", client_id="123", scopes=[], claims={"login": login}
+        )
+    )
 
 
 def get_posts(result) -> list:
@@ -475,6 +494,67 @@ class TestIntegration:
                     "get_recent_blog_posts", {"limit": 3}
                 )
                 assert isinstance(get_posts(posts_result), list)
+
+
+class TestAuthMount:
+    """mcp_auth must expose the same tools as mcp, live via mount(), and gate
+    them on GITHUB_ALLOWED_LOGINS rather than on GitHub identity alone."""
+
+    @pytest.mark.asyncio
+    async def test_mounts_the_same_tools_as_the_public_server(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        token = auth_context_var.set(fake_login("andrewbolster"))
+        try:
+            async with Client(mcp) as public_client, Client(mcp_auth) as auth_client:
+                public_names = {t.name for t in await public_client.list_tools()}
+                auth_names = {t.name for t in await auth_client.list_tools()}
+            assert auth_names == public_names
+            assert "send_contact_message" in auth_names
+        finally:
+            auth_context_var.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_unauthenticated_call_sees_no_tools(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        async with Client(mcp_auth) as client:
+            assert await client.list_tools() == []
+
+    @pytest.mark.asyncio
+    async def test_login_not_on_the_allowlist_is_rejected(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        token = auth_context_var.set(fake_login("someone-else"))
+        try:
+            async with Client(mcp_auth) as client:
+                assert await client.list_tools() == []
+                with pytest.raises(Exception, match="insufficient permissions"):
+                    await client.call_tool(
+                        "send_contact_message", {"message": "hi", "sender": "x"}
+                    )
+        finally:
+            auth_context_var.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_allowed_login_can_call_a_mounted_tool(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        token = auth_context_var.set(fake_login("andrewbolster"))
+        try:
+            async with Client(mcp_auth) as client:
+                result = await client.call_tool(
+                    "send_contact_message", {"message": "hi", "sender": "x"}
+                )
+                assert "Message received" in result.data
+        finally:
+            auth_context_var.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_empty_allowlist_fails_closed(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_ALLOWED_LOGINS", raising=False)
+        token = auth_context_var.set(fake_login("andrewbolster"))
+        try:
+            async with Client(mcp_auth) as client:
+                assert await client.list_tools() == []
+        finally:
+            auth_context_var.reset(token)
 
 
 if __name__ == "__main__":

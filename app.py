@@ -6,14 +6,23 @@ This MCP server provides curated resources and links about Andrew Bolster,
 a Northern Ireland-based technology researcher, data scientist, and community builder.
 """
 
+import contextlib
+import os
 import re
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
 import httpx
+from defusedxml import (
+    ElementTree as ET,  # noqa: N817 — matches stdlib's own ET convention
+)
 from fastmcp import Context, FastMCP
+from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.middleware import AuthMiddleware
+from fastmcp.server.middleware.authorization import AuthContext
 from fastmcp.tools.tool import ToolAnnotations
+from starlette.applications import Starlette
+from starlette.routing import Mount
 
 # Initialize the MCP server
 mcp = FastMCP(
@@ -465,6 +474,82 @@ try:
     )
 except ImportError:
     pass
+
+
+def require_allowed_login(ctx: AuthContext) -> bool:
+    """Restrict every mounted tool/resource to logins in GITHUB_ALLOWED_LOGINS.
+
+    GitHubProvider authenticates any GitHub account; this is the separate
+    check for *which* accounts. Empty/unset GITHUB_ALLOWED_LOGINS allows no
+    one, rather than everyone, so a misconfigured host fails closed.
+    """
+    if ctx.token is None:
+        return False
+    allowed = {
+        login.strip()
+        for login in os.environ.get("GITHUB_ALLOWED_LOGINS", "").split(",")
+        if login.strip()
+    }
+    return ctx.token.claims.get("login") in allowed
+
+
+# mcp_auth exposes exactly the same tools/resources as mcp, live via mount()
+# rather than redefined — nothing here can drift from the public server.
+# Auth-scoped tools (memory, private data) are added to mcp_auth later.
+mcp_auth = FastMCP(
+    name="Andrew Bolster Resources (auth)",
+    auth=GitHubProvider(
+        client_id=os.environ.get("GITHUB_CLIENT_ID", ""),
+        client_secret=os.environ.get("GITHUB_CLIENT_SECRET", ""),
+        base_url="https://mcp.bolster.online/auth/mcp",
+    ),
+    middleware=[AuthMiddleware(auth=require_allowed_login)],
+)
+mcp_auth.mount(mcp, namespace=None)
+
+# Deployed via uvicorn (`uvicorn app:app`), not `fastmcp run`, since the
+# latter only knows how to serve a single bare FastMCP object and this repo
+# now needs two, composed under one ASGI app. nginx already proxies both
+# paths to this one process unchanged.
+_mcp_http_app = mcp.http_app(path="/")
+_mcp_auth_http_app = mcp_auth.http_app(path="/")
+
+
+@contextlib.asynccontextmanager
+async def _combined_lifespan(starlette_app: Starlette):
+    # Each http_app() owns its own StreamableHTTPSessionManager task group;
+    # skipping either lifespan surfaces as a 500 ("Task group is not
+    # initialized") on first request to that mount, not at startup.
+    async with _mcp_http_app.lifespan(starlette_app):
+        async with _mcp_auth_http_app.lifespan(starlette_app):
+            yield
+
+
+# RFC 8414/9728 well-known discovery URLs are always resolved relative to
+# the origin root, never to the resource's own path — so a client doing
+# correct discovery against https://mcp.bolster.online/auth/mcp/ requests
+# /.well-known/oauth-authorization-server and
+# /.well-known/oauth-protected-resource/auth/mcp/ at the root, not nested
+# under /auth/mcp/. GitHubProvider already builds these two routes with the
+# right (path-suffixed, per RFC 9728) target inside _mcp_auth_http_app;
+# they just need to also be reachable at the root, alongside the /auth/mcp
+# mount that serves the actual OAuth/MCP endpoints. Confirmed by curling a
+# live composed app: neither the nested-only nor a mistaken un-suffixed
+# root path resolves — this is the fix, not a guess.
+_well_known_routes = [
+    route
+    for route in _mcp_auth_http_app.routes
+    if getattr(route, "path", "").startswith("/.well-known/")
+]
+
+app = Starlette(
+    routes=[
+        Mount("/mcp", app=_mcp_http_app),
+        Mount("/auth/mcp", app=_mcp_auth_http_app),
+        *_well_known_routes,
+    ],
+    lifespan=_combined_lifespan,
+)
 
 
 if __name__ == "__main__":
