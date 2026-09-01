@@ -102,6 +102,18 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
+    # OAuth discovery (RFC 8414/9728) is always requested at the origin
+    # root, e.g. /.well-known/oauth-authorization-server — a real MCP
+    # client needs this to reach /auth/mcp's GitHub sign-in flow. ^~ takes
+    # precedence over the dotfile deny-all regex below regardless of order.
+    location ^~ /.well-known/ {
+        proxy_pass http://localhost:9001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     # Block access to sensitive files
     location ~ /\. {
         deny all;
