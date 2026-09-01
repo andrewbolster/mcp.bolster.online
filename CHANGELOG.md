@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0] - 2026-08-30
+## \[0.2.0\] - 2026-08-30
 
 - feat: add upgrade-bolster workflow triggered by repository_dispatch (#12)
 - fix: set HOME and remove contradictory ReadOnlyPaths in mcp-bolster service
@@ -48,7 +48,6 @@
 - 🔧 Fix linting issues: remove unused imports and variables
 - 🚀 Complete MCP Server Implementation with AI-Powered GitHub Actions
 - Initial commit
-
 
 All notable changes to this project will be documented in this file.
 

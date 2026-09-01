@@ -18,9 +18,7 @@ from click_mcp import register_click_commands  # noqa: E402
 @pytest.fixture(scope="module")
 def bolster_mcp():
     mcp = FastMCP("bolster-integration-test")
-    register_click_commands(
-        mcp, bolster_cli, prefix="bolster", exclude={"list-sources"}
-    )
+    register_click_commands(mcp, bolster_cli, prefix="bolster", exclude={"list-sources"})
     return mcp
 
 
@@ -50,6 +48,4 @@ async def test_bolster_all_tools_have_valid_input_schema(bolster_mcp):
     for tool in tools:
         schema = tool.inputSchema
         assert isinstance(schema, dict), f"Tool {tool.name!r} inputSchema is not a dict"
-        assert schema.get("type") == "object", (
-            f"Tool {tool.name!r} inputSchema type != object"
-        )
+        assert schema.get("type") == "object", f"Tool {tool.name!r} inputSchema type != object"

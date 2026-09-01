@@ -287,22 +287,15 @@ Note: This is currently a placeholder implementation. The message has been logge
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def check_availability(
     ctx: Context,
-    start_date: Annotated[
-        str | None, "Start date in YYYY-MM-DD format (defaults to today)"
-    ] = None,
+    start_date: Annotated[str | None, "Start date in YYYY-MM-DD format (defaults to today)"] = None,
     days_ahead: Annotated[int, "Number of days to check ahead"] = 7,
 ) -> str:
     """Check Andrew Bolster's calendar availability using his public iCal feed."""
     try:
-        if start_date:
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        else:
-            start_dt = datetime.now()
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else datetime.now()
 
         end_dt = start_dt + timedelta(days=days_ahead)
-        await ctx.info(
-            f"Checking availability from {start_dt.date()} for {days_ahead} days"
-        )
+        await ctx.info(f"Checking availability from {start_dt.date()} for {days_ahead} days")
 
         ical_url = "https://calendar.google.com/calendar/ical/andrew.bolster%40gmail.com/public/basic.ics"
         async with httpx.AsyncClient(timeout=10) as client:
@@ -433,15 +426,9 @@ async def get_recent_blog_posts(
             description_elem = item.find("description")
             pub_date_elem = item.find("pubDate")
 
-            title = (
-                (title_elem.text or "No title")
-                if title_elem is not None
-                else "No title"
-            )
+            title = (title_elem.text or "No title") if title_elem is not None else "No title"
             link = (link_elem.text or "") if link_elem is not None else ""
-            description = (
-                (description_elem.text or "") if description_elem is not None else ""
-            )
+            description = (description_elem.text or "") if description_elem is not None else ""
             pub_date = (pub_date_elem.text or "") if pub_date_elem is not None else ""
 
             # Strip HTML tags and truncate
@@ -449,9 +436,7 @@ async def get_recent_blog_posts(
             if len(description) > 500:
                 description = description[:497] + "..."
 
-            posts.append(
-                BlogPost(title=title, date=pub_date, url=link, summary=description)
-            )
+            posts.append(BlogPost(title=title, date=pub_date, url=link, summary=description))
 
         await ctx.info(f"Returning {len(posts)} posts")
         return posts
@@ -472,9 +457,7 @@ try:
 
     from click_mcp import register_click_commands
 
-    register_click_commands(
-        mcp, _bolster_cli, prefix="bolster", exclude={"list-sources"}
-    )
+    register_click_commands(mcp, _bolster_cli, prefix="bolster", exclude={"list-sources"})
 except ImportError:
     pass
 
@@ -488,11 +471,7 @@ def require_allowed_login(ctx: AuthContext) -> bool:
     """
     if ctx.token is None:
         return False
-    allowed = {
-        login.strip()
-        for login in os.environ.get("GITHUB_ALLOWED_LOGINS", "").split(",")
-        if login.strip()
-    }
+    allowed = {login.strip() for login in os.environ.get("GITHUB_ALLOWED_LOGINS", "").split(",") if login.strip()}
     return ctx.token.claims.get("login") in allowed
 
 
@@ -552,9 +531,8 @@ async def _combined_lifespan(starlette_app: Starlette):
     # Each http_app() owns its own StreamableHTTPSessionManager task group;
     # skipping either lifespan surfaces as a 500 ("Task group is not
     # initialized") on first request to that mount, not at startup.
-    async with _mcp_http_app.lifespan(starlette_app):
-        async with _mcp_auth_http_app.lifespan(starlette_app):
-            yield
+    async with _mcp_http_app.lifespan(starlette_app), _mcp_auth_http_app.lifespan(starlette_app):
+        yield
 
 
 # _mcp_auth_http_app already owns its full external paths (/auth/mcp for

@@ -28,11 +28,7 @@ def fake_login(login: str) -> AuthenticatedUser:
     auth middleware populates from a real bearer token) lets AuthMiddleware
     see an authenticated caller without driving a real OAuth round trip.
     """
-    return AuthenticatedUser(
-        AccessToken(
-            token="test-token", client_id="123", scopes=[], claims={"login": login}
-        )
-    )
+    return AuthenticatedUser(AccessToken(token="test-token", client_id="123", scopes=[], claims={"login": login}))
 
 
 def get_posts(result) -> list:
@@ -44,9 +40,7 @@ def get_posts(result) -> list:
     return json.loads(result.content[0].text)
 
 
-def make_httpx_response(
-    text: str = "", content: bytes = b"", status_code: int = 200
-) -> MagicMock:
+def make_httpx_response(text: str = "", content: bytes = b"", status_code: int = 200) -> MagicMock:
     """Build a mock httpx.Response."""
     mock = MagicMock(spec=httpx.Response)
     mock.text = text
@@ -67,9 +61,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_personal_website_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/personal-website"
-            )
+            result = await client.read_resource("resource://andrew-bolster/personal-website")
             content = result[0].text
             assert "Andrew Bolster - Personal Website" in content
             assert "https://andrewbolster.info/" in content
@@ -78,9 +70,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_professional_profile_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/professional-profile"
-            )
+            result = await client.read_resource("resource://andrew-bolster/professional-profile")
             content = result[0].text
             assert "Andrew Bolster - Professional Profile" in content
             assert "BSides Belfast" in content
@@ -98,9 +88,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_social_media_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/social-media"
-            )
+            result = await client.read_resource("resource://andrew-bolster/social-media")
             content = result[0].text
             assert isinstance(content, str)
             assert "https://" in content
@@ -108,9 +96,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_research_interests_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/research-interests"
-            )
+            result = await client.read_resource("resource://andrew-bolster/research-interests")
             content = result[0].text
             assert "Generative AI" in content
             assert "autonomous underwater vehicles" in content
@@ -118,9 +104,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_community_involvement_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/community-involvement"
-            )
+            result = await client.read_resource("resource://andrew-bolster/community-involvement")
             content = result[0].text
             assert isinstance(content, str)
             assert "#" in content
@@ -128,9 +112,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_technical_blog_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/technical-blog"
-            )
+            result = await client.read_resource("resource://andrew-bolster/technical-blog")
             content = result[0].text
             assert "https://andrewbolster.info/blog/" in content
             assert "PhD diary entries" in content
@@ -152,9 +134,7 @@ class TestContactTool:
     @pytest.mark.asyncio
     async def test_send_contact_message_empty_fields(self):
         async with Client(mcp) as client:
-            result = await client.call_tool(
-                "send_contact_message", {"message": "", "sender": "Test User"}
-            )
+            result = await client.call_tool("send_contact_message", {"message": "", "sender": "Test User"})
             assert "Length: 0 characters" in result.data
 
     @pytest.mark.asyncio
@@ -171,9 +151,7 @@ class TestContactTool:
 class TestAvailabilityTool:
     @pytest.mark.asyncio
     async def test_check_availability_no_events(self):
-        mock_response = make_httpx_response(
-            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
-        )
+        mock_response = make_httpx_response(text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR")
         with patch("app.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -182,9 +160,7 @@ class TestAvailabilityTool:
             mock_client_cls.return_value = mock_client
 
             async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
-                )
+                result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 7})
                 assert "No scheduled events found" in result.data
                 assert "2024-12-01" in result.data
 
@@ -207,17 +183,13 @@ END:VCALENDAR"""
             mock_client_cls.return_value = mock_client
 
             async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
-                )
+                result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 7})
                 assert "Team Meeting" in result.data
                 assert "2024-12-02 10:00" in result.data
 
     @pytest.mark.asyncio
     async def test_check_availability_default_parameters(self):
-        mock_response = make_httpx_response(
-            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
-        )
+        mock_response = make_httpx_response(text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR")
         with patch("app.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -236,15 +208,11 @@ END:VCALENDAR"""
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(
-                side_effect=httpx.RequestError("Connection refused")
-            )
+            mock_client.get = AsyncMock(side_effect=httpx.RequestError("Connection refused"))
             mock_client_cls.return_value = mock_client
 
             async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 3}
-                )
+                result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 3})
                 assert "Error fetching calendar data" in result.data
 
     @pytest.mark.asyncio
@@ -257,9 +225,7 @@ END:VCALENDAR"""
             mock_client_cls.return_value = mock_client
 
             async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 3}
-                )
+                result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 3})
                 assert "Error processing calendar information" in result.data
 
     @pytest.mark.asyncio
@@ -281,16 +247,12 @@ END:VCALENDAR"""
             mock_client_cls.return_value = mock_client
 
             async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
-                )
+                result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 7})
                 assert "Conference Day" in result.data
 
     @pytest.mark.asyncio
     async def test_check_availability_custom_date_range(self):
-        mock_response = make_httpx_response(
-            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
-        )
+        mock_response = make_httpx_response(text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR")
         with patch("app.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -299,9 +261,7 @@ END:VCALENDAR"""
             mock_client_cls.return_value = mock_client
 
             async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2025-01-15", "days_ahead": 14}
-                )
+                result = await client.call_tool("check_availability", {"start_date": "2025-01-15", "days_ahead": 14})
                 assert "2025-01-15" in result.data
                 assert "2025-01-29" in result.data
 
@@ -385,9 +345,7 @@ class TestRSSFeedTool:
 
     @pytest.mark.asyncio
     async def test_get_recent_blog_posts_no_channel(self):
-        mock_response = make_httpx_response(
-            content=b"""<?xml version="1.0"?><rss version="2.0"></rss>"""
-        )
+        mock_response = make_httpx_response(content=b"""<?xml version="1.0"?><rss version="2.0"></rss>""")
         with patch("app.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -458,9 +416,7 @@ class TestIntegration:
 
     @pytest.mark.asyncio
     async def test_all_tools_callable(self):
-        empty_ical = make_httpx_response(
-            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
-        )
+        empty_ical = make_httpx_response(text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR")
         empty_rss = make_httpx_response(
             content=b"""<?xml version="1.0"?>
 <rss version="2.0"><channel></channel></rss>"""
@@ -490,9 +446,7 @@ class TestIntegration:
                 mock_client.get = AsyncMock(return_value=empty_rss)
                 mock_client_cls.return_value = mock_client
 
-                posts_result = await client.call_tool(
-                    "get_recent_blog_posts", {"limit": 3}
-                )
+                posts_result = await client.call_tool("get_recent_blog_posts", {"limit": 3})
                 assert isinstance(get_posts(posts_result), list)
 
 
@@ -511,9 +465,7 @@ class TestAuthMount:
                 auth_names = {t.name for t in await auth_client.list_tools()}
             assert public_names <= auth_names, "mounted tools must all still be present"
             assert "whoami" in auth_names
-            assert "whoami" not in public_names, (
-                "auth-scoped tools stay off the public server"
-            )
+            assert "whoami" not in public_names, "auth-scoped tools stay off the public server"
             assert "send_contact_message" in auth_names
         finally:
             auth_context_var.reset(token)
@@ -532,9 +484,7 @@ class TestAuthMount:
             async with Client(mcp_auth) as client:
                 assert await client.list_tools() == []
                 with pytest.raises(Exception, match="insufficient permissions"):
-                    await client.call_tool(
-                        "send_contact_message", {"message": "hi", "sender": "x"}
-                    )
+                    await client.call_tool("send_contact_message", {"message": "hi", "sender": "x"})
         finally:
             auth_context_var.reset(token)
 
@@ -544,9 +494,7 @@ class TestAuthMount:
         token = auth_context_var.set(fake_login("andrewbolster"))
         try:
             async with Client(mcp_auth) as client:
-                result = await client.call_tool(
-                    "send_contact_message", {"message": "hi", "sender": "x"}
-                )
+                result = await client.call_tool("send_contact_message", {"message": "hi", "sender": "x"})
                 assert "Message received" in result.data
         finally:
             auth_context_var.reset(token)

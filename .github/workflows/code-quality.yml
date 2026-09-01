@@ -30,19 +30,15 @@ jobs:
 
     - name: 📦 Install dependencies and dev tools
       run: |
-        uv sync
+        uv sync --group dev
 
-    - name: ⚡ Run Ruff (super fast linter)
+    # Runs the exact hook config in .pre-commit-config.yaml — CI and local
+    # pre-commit cannot disagree about what counts as clean, since there's
+    # only one place (that file) where versions live. Covers ruff check,
+    # ruff format, mypy, gitleaks, and the hygiene hooks in one step.
+    - name: 🔍 Run pre-commit
       run: |
-        uv run ruff check . --output-format=github --target-version=py311
-
-    - name: 🎨 Check code formatting with Ruff
-      run: |
-        uv run ruff format --check --diff .
-
-    - name: 🔍 Type checking with mypy
-      run: |
-        uv run mypy app.py --ignore-missing-imports
+        uv run pre-commit run --all-files --show-diff-on-failure
 
     - name: 📊 Code complexity analysis
       run: |
