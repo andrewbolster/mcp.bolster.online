@@ -22,6 +22,8 @@ from fastmcp.server.middleware import AuthMiddleware
 from fastmcp.server.middleware.authorization import AuthContext
 from fastmcp.tools.tool import ToolAnnotations
 from starlette.applications import Starlette
+from starlette.middleware import Middleware as StarletteMiddleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
 
 # Initialize the MCP server
@@ -542,11 +544,29 @@ _well_known_routes = [
     if getattr(route, "path", "").startswith("/.well-known/")
 ]
 
+# Browser-based OAuth clients (RFC 8414/9728) send an unmatched-route
+# discovery probe before falling back — e.g. /.well-known/oauth-authorization-
+# server/auth/mcp, which legitimately 404s since no route registers that
+# exact path. Without CORS headers on THAT 404, browsers surface it as a
+# hard CORS failure instead of a normal "not found", which the MCP SDK
+# client (fetchWithCorsRetry) treats as fatal rather than trying the next
+# discovery candidate — breaking auth for any browser-based client, though
+# invisible to curl/Node since neither enforces CORS. CORSMiddleware here
+# ensures every response from this app, matched route or not, carries
+# consistent CORS headers.
 app = Starlette(
     routes=[
         Mount("/mcp", app=_mcp_http_app),
         Mount("/auth/mcp", app=_mcp_auth_http_app),
         *_well_known_routes,
+    ],
+    middleware=[
+        StarletteMiddleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     ],
     lifespan=_combined_lifespan,
 )
