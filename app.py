@@ -498,12 +498,29 @@ def require_allowed_login(ctx: AuthContext) -> bool:
 # mcp_auth exposes exactly the same tools/resources as mcp, live via mount()
 # rather than redefined — nothing here can drift from the public server.
 # Auth-scoped tools (memory, private data) are added to mcp_auth later.
+#
+# base_url is the bare origin, and http_app(path="/auth/mcp") below tells
+# FastMCP the full external path directly, rather than base_url carrying
+# "/auth/mcp" *and* an outer Starlette Mount("/auth/mcp", ...) adding it
+# again. FastMCP's own resource-URL computation (auth.py's
+# _get_resource_url) appends its own `path` on top of base_url — with the
+# old double-prefixed shape that always produced a trailing slash on the
+# declared OAuth "resource" identifier (".../auth/mcp/") no matter what was
+# configured, which real MCP clients then rejected: they compute their own
+# "requested resource" from whatever URL a user typed (usually without a
+# trailing slash) and require an exact prefix match against what the server
+# declares. With the path owned in one place, the declared resource is
+# exactly "https://mcp.bolster.online/auth/mcp" — no slash, matching how
+# anyone would naturally type it. It also collapses the OAuth issuer to the
+# site root, so RFC 8414 discovery is the plain, single-candidate form
+# instead of the path-aware-with-fallback form — simpler, and avoids an
+# unmatched-route discovery probe entirely rather than just handling it.
 mcp_auth = FastMCP(
     name="Andrew Bolster Resources (auth)",
     auth=GitHubProvider(
         client_id=os.environ.get("GITHUB_CLIENT_ID", ""),
         client_secret=os.environ.get("GITHUB_CLIENT_SECRET", ""),
-        base_url="https://mcp.bolster.online/auth/mcp",
+        base_url="https://mcp.bolster.online",
     ),
     middleware=[AuthMiddleware(auth=require_allowed_login)],
 )
@@ -514,7 +531,7 @@ mcp_auth.mount(mcp, namespace=None)
 # now needs two, composed under one ASGI app. nginx already proxies both
 # paths to this one process unchanged.
 _mcp_http_app = mcp.http_app(path="/")
-_mcp_auth_http_app = mcp_auth.http_app(path="/")
+_mcp_auth_http_app = mcp_auth.http_app(path="/auth/mcp")
 
 
 @contextlib.asynccontextmanager
@@ -527,38 +544,19 @@ async def _combined_lifespan(starlette_app: Starlette):
             yield
 
 
-# RFC 8414/9728 well-known discovery URLs are always resolved relative to
-# the origin root, never to the resource's own path — so a client doing
-# correct discovery against https://mcp.bolster.online/auth/mcp/ requests
-# /.well-known/oauth-authorization-server and
-# /.well-known/oauth-protected-resource/auth/mcp/ at the root, not nested
-# under /auth/mcp/. GitHubProvider already builds these two routes with the
-# right (path-suffixed, per RFC 9728) target inside _mcp_auth_http_app;
-# they just need to also be reachable at the root, alongside the /auth/mcp
-# mount that serves the actual OAuth/MCP endpoints. Confirmed by curling a
-# live composed app: neither the nested-only nor a mistaken un-suffixed
-# root path resolves — this is the fix, not a guess.
-_well_known_routes = [
-    route
-    for route in _mcp_auth_http_app.routes
-    if getattr(route, "path", "").startswith("/.well-known/")
-]
-
-# Browser-based OAuth clients (RFC 8414/9728) send an unmatched-route
-# discovery probe before falling back — e.g. /.well-known/oauth-authorization-
-# server/auth/mcp, which legitimately 404s since no route registers that
-# exact path. Without CORS headers on THAT 404, browsers surface it as a
-# hard CORS failure instead of a normal "not found", which the MCP SDK
-# client (fetchWithCorsRetry) treats as fatal rather than trying the next
-# discovery candidate — breaking auth for any browser-based client, though
-# invisible to curl/Node since neither enforces CORS. CORSMiddleware here
-# ensures every response from this app, matched route or not, carries
-# consistent CORS headers.
+# _mcp_auth_http_app already owns its full external paths (/auth/mcp for
+# the MCP endpoint, /authorize, /token, /register, /auth/callback, /consent,
+# /.well-known/* — all root-relative, since base_url is the bare origin
+# above), so it's mounted at "/" rather than wrapped in another prefix.
+# /mcp must be listed first: Starlette tries routes in order, and a root
+# mount would otherwise swallow it. CORSMiddleware guards against a
+# now-mostly-theoretical unmatched-route discovery probe still returning a
+# CORS-header-less 404, which real browsers (unlike curl or Node) treat as
+# a hard failure rather than a normal 4xx to fall back from.
 app = Starlette(
     routes=[
         Mount("/mcp", app=_mcp_http_app),
-        Mount("/auth/mcp", app=_mcp_auth_http_app),
-        *_well_known_routes,
+        Mount("/", app=_mcp_auth_http_app),
     ],
     middleware=[
         StarletteMiddleware(
