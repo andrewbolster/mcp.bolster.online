@@ -387,60 +387,66 @@ async def get_recent_blog_posts(
         return []
 
 
-BLOG_DOMAIN = "andrewbolster.info"
-MAX_POST_CHARS = 50_000
+SITE_DOMAIN = "andrewbolster.info"
+MAX_PAGE_CHARS = 50_000
 
 
-def _blog_markdown_url(url: str) -> str:
-    """Convert a blog post URL to its markdown-alternate URL.
+def _site_markdown_url(url: str) -> str:
+    """Convert a page URL to its markdown-alternate URL.
 
     Hugo publishes a `text/markdown` alternate (frontmatter + body, internal
-    links already relativized) for every post at `<post-url>/index.md` —
-    confirmed live across posts from 2010 through 2026. Restricting to exactly
-    BLOG_DOMAIN (no subdomain match, no other host) is what keeps this tool
-    from becoming a general-purpose URL fetcher.
+    links already relativized) for every blog post and most static pages
+    (about, now, ideas, archives, resume, ...) at `<page-url>/index.md` —
+    confirmed live across content from 2010 through 2026. A handful of page
+    types don't get one (list/taxonomy pages like /tags/) and 404 instead;
+    the caller handles that gracefully rather than this function trying to
+    predict it. Restricting to exactly SITE_DOMAIN (no subdomain match, no
+    other host) is what keeps this tool from becoming a general-purpose URL
+    fetcher.
 
     Raises:
-        ValueError: If url isn't an http(s) URL on BLOG_DOMAIN.
+        ValueError: If url isn't an http(s) URL on SITE_DOMAIN.
     """
     parsed = urlsplit(url)
-    if parsed.scheme not in ("http", "https") or parsed.hostname != BLOG_DOMAIN:
-        raise ValueError(f"only https://{BLOG_DOMAIN} URLs are supported, got: {url!r}")
+    if parsed.scheme not in ("http", "https") or parsed.hostname != SITE_DOMAIN:
+        raise ValueError(f"only https://{SITE_DOMAIN} URLs are supported, got: {url!r}")
     path = parsed.path if parsed.path.endswith("/") else parsed.path + "/"
-    return urlunsplit(("https", BLOG_DOMAIN, path + "index.md", "", ""))
+    return urlunsplit(("https", SITE_DOMAIN, path + "index.md", "", ""))
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_blog_post_content(
+async def get_page_content(
     ctx: Context,
-    url: Annotated[str, "A post URL, e.g. from get_recent_blog_posts' results"],
+    url: Annotated[str, "A page URL on andrewbolster.info, e.g. from get_recent_blog_posts' results"],
 ) -> str:
-    """Fetch the full content of one Andrew Bolster blog post, as markdown.
+    """Fetch the full content of one andrewbolster.info page, as markdown.
 
-    Only works for URLs on andrewbolster.info — get_recent_blog_posts only
-    returns summaries; use this tool for the full text of a specific post.
+    Works for blog posts and most static pages (About, Now, Ideas, Archives,
+    Resume, ...). Only works for URLs on andrewbolster.info —
+    get_recent_blog_posts only returns summaries; use this tool for the full
+    text of a specific post or page.
     """
     try:
-        markdown_url = _blog_markdown_url(url)
+        markdown_url = _site_markdown_url(url)
     except ValueError as e:
         await ctx.warning(str(e))
         return f"Can't fetch that URL: {e}"
 
-    await ctx.info(f"Fetching blog post content from {markdown_url}")
+    await ctx.info(f"Fetching page content from {markdown_url}")
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(markdown_url)
             response.raise_for_status()
     except httpx.HTTPStatusError as e:
-        await ctx.warning(f"Blog post not found: {e}")
-        return f"Couldn't find that post (HTTP {e.response.status_code})."
+        await ctx.warning(f"Page not found: {e}")
+        return f"Couldn't find that page (HTTP {e.response.status_code})."
     except httpx.HTTPError as e:
-        await ctx.warning(f"HTTP error fetching blog post: {e}")
-        return f"Error fetching post content: {e}"
+        await ctx.warning(f"HTTP error fetching page: {e}")
+        return f"Error fetching page content: {e}"
 
     text = response.text
-    if len(text) > MAX_POST_CHARS:
-        text = text[:MAX_POST_CHARS] + "\n\n... (truncated)"
+    if len(text) > MAX_PAGE_CHARS:
+        text = text[:MAX_PAGE_CHARS] + "\n\n... (truncated)"
     return text
 
 
