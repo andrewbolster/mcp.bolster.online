@@ -19,7 +19,7 @@ from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 
 import availability
-from app import MAX_POST_CHARS, mcp, mcp_auth
+from app import MAX_PAGE_CHARS, mcp, mcp_auth
 
 
 def fake_login(login: str) -> AuthenticatedUser:
@@ -400,8 +400,8 @@ class TestRSSFeedTool:
                 assert len(posts[0]["summary"]) == 500
 
 
-class TestBlogPostContentTool:
-    """get_blog_post_content fetches Hugo's markdown alternate for a post — andrewbolster.info only."""
+class TestPageContentTool:
+    """get_page_content fetches Hugo's markdown alternate for a page — andrewbolster.info only."""
 
     MARKDOWN_BODY = b"""---
 title: "A Post"
@@ -423,10 +423,32 @@ Full post body here.
 
             async with Client(mcp) as client:
                 result = await client.call_tool(
-                    "get_blog_post_content", {"url": "https://andrewbolster.info/2024/01/a-post/"}
+                    "get_page_content", {"url": "https://andrewbolster.info/2024/01/a-post/"}
                 )
                 assert "Full post body here." in result.data
                 mock_client.get.assert_awaited_once_with("https://andrewbolster.info/2024/01/a-post/index.md")
+
+    @pytest.mark.asyncio
+    async def test_fetches_static_page_not_just_blog_posts(self):
+        static_body = b"""---
+title: "About"
+url: "http://andrewbolster.info/about/"
+---
+
+About page content.
+"""
+        mock_response = make_httpx_response(text=static_body.decode())
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_page_content", {"url": "https://andrewbolster.info/about/"})
+                assert "About page content." in result.data
+                mock_client.get.assert_awaited_once_with("https://andrewbolster.info/about/index.md")
 
     @pytest.mark.asyncio
     async def test_adds_missing_trailing_slash(self):
@@ -439,7 +461,7 @@ Full post body here.
             mock_client_cls.return_value = mock_client
 
             async with Client(mcp) as client:
-                await client.call_tool("get_blog_post_content", {"url": "https://andrewbolster.info/2024/01/a-post"})
+                await client.call_tool("get_page_content", {"url": "https://andrewbolster.info/2024/01/a-post"})
                 mock_client.get.assert_awaited_once_with("https://andrewbolster.info/2024/01/a-post/index.md")
 
     @pytest.mark.asyncio
@@ -451,7 +473,7 @@ Full post body here.
             mock_client_cls.return_value = mock_client
 
             async with Client(mcp) as client:
-                result = await client.call_tool("get_blog_post_content", {"url": "https://evil.example.com/x/"})
+                result = await client.call_tool("get_page_content", {"url": "https://evil.example.com/x/"})
                 assert "Can't fetch that URL" in result.data
                 mock_client.get.assert_not_awaited()
 
@@ -465,7 +487,7 @@ Full post body here.
             mock_client_cls.return_value = mock_client
 
             async with Client(mcp) as client:
-                result = await client.call_tool("get_blog_post_content", {"url": "https://notandrewbolster.info/x/"})
+                result = await client.call_tool("get_page_content", {"url": "https://notandrewbolster.info/x/"})
                 assert "Can't fetch that URL" in result.data
                 mock_client.get.assert_not_awaited()
 
@@ -481,10 +503,8 @@ Full post body here.
             mock_client_cls.return_value = mock_client
 
             async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "get_blog_post_content", {"url": "https://andrewbolster.info/2099/01/nope/"}
-                )
-                assert "Couldn't find that post" in result.data
+                result = await client.call_tool("get_page_content", {"url": "https://andrewbolster.info/2099/01/nope/"})
+                assert "Couldn't find that page" in result.data
 
     @pytest.mark.asyncio
     async def test_network_error(self):
@@ -497,13 +517,13 @@ Full post body here.
 
             async with Client(mcp) as client:
                 result = await client.call_tool(
-                    "get_blog_post_content", {"url": "https://andrewbolster.info/2024/01/a-post/"}
+                    "get_page_content", {"url": "https://andrewbolster.info/2024/01/a-post/"}
                 )
-                assert "Error fetching post content" in result.data
+                assert "Error fetching page content" in result.data
 
     @pytest.mark.asyncio
     async def test_truncates_oversized_content(self):
-        huge = "x" * (MAX_POST_CHARS + 1000)
+        huge = "x" * (MAX_PAGE_CHARS + 1000)
         mock_response = make_httpx_response(text=huge)
         with patch("app.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
@@ -514,10 +534,10 @@ Full post body here.
 
             async with Client(mcp) as client:
                 result = await client.call_tool(
-                    "get_blog_post_content", {"url": "https://andrewbolster.info/2024/01/a-post/"}
+                    "get_page_content", {"url": "https://andrewbolster.info/2024/01/a-post/"}
                 )
                 assert result.data.endswith("(truncated)")
-                assert len(result.data) <= MAX_POST_CHARS + len("\n\n... (truncated)")
+                assert len(result.data) <= MAX_PAGE_CHARS + len("\n\n... (truncated)")
 
 
 class TestIntegration:
