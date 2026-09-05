@@ -11,6 +11,7 @@ import os
 import re
 from datetime import datetime
 from typing import Annotated
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from defusedxml import (
@@ -384,6 +385,63 @@ async def get_recent_blog_posts(
     except Exception as e:
         await ctx.warning(f"Unexpected error in get_recent_blog_posts: {e}")
         return []
+
+
+BLOG_DOMAIN = "andrewbolster.info"
+MAX_POST_CHARS = 50_000
+
+
+def _blog_markdown_url(url: str) -> str:
+    """Convert a blog post URL to its markdown-alternate URL.
+
+    Hugo publishes a `text/markdown` alternate (frontmatter + body, internal
+    links already relativized) for every post at `<post-url>/index.md` —
+    confirmed live across posts from 2010 through 2026. Restricting to exactly
+    BLOG_DOMAIN (no subdomain match, no other host) is what keeps this tool
+    from becoming a general-purpose URL fetcher.
+
+    Raises:
+        ValueError: If url isn't an http(s) URL on BLOG_DOMAIN.
+    """
+    parsed = urlsplit(url)
+    if parsed.scheme not in ("http", "https") or parsed.hostname != BLOG_DOMAIN:
+        raise ValueError(f"only https://{BLOG_DOMAIN} URLs are supported, got: {url!r}")
+    path = parsed.path if parsed.path.endswith("/") else parsed.path + "/"
+    return urlunsplit(("https", BLOG_DOMAIN, path + "index.md", "", ""))
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_blog_post_content(
+    ctx: Context,
+    url: Annotated[str, "A post URL, e.g. from get_recent_blog_posts' results"],
+) -> str:
+    """Fetch the full content of one Andrew Bolster blog post, as markdown.
+
+    Only works for URLs on andrewbolster.info — get_recent_blog_posts only
+    returns summaries; use this tool for the full text of a specific post.
+    """
+    try:
+        markdown_url = _blog_markdown_url(url)
+    except ValueError as e:
+        await ctx.warning(str(e))
+        return f"Can't fetch that URL: {e}"
+
+    await ctx.info(f"Fetching blog post content from {markdown_url}")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(markdown_url)
+            response.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        await ctx.warning(f"Blog post not found: {e}")
+        return f"Couldn't find that post (HTTP {e.response.status_code})."
+    except httpx.HTTPError as e:
+        await ctx.warning(f"HTTP error fetching blog post: {e}")
+        return f"Error fetching post content: {e}"
+
+    text = response.text
+    if len(text) > MAX_POST_CHARS:
+        text = text[:MAX_POST_CHARS] + "\n\n... (truncated)"
+    return text
 
 
 try:
