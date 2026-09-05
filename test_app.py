@@ -9,10 +9,10 @@ import base64
 import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
+import requests
 from fastmcp import Client
 from fastmcp.server.auth.auth import AccessToken
 from mcp.server.auth.middleware.auth_context import auth_context_var
@@ -151,17 +151,20 @@ class TestContactTool:
             assert str(datetime.now().year) in result.data
 
 
-def make_ics_client_mock(ics_bodies: dict[str, str]) -> AsyncMock:
-    """Build a mock httpx.AsyncClient whose .get() returns ICS content keyed by URL."""
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
+def mock_calendar_session_get(ics_bodies: dict[str, str]):
+    """Build a side_effect for bolster.utils.calendars.session.get, keyed by URL.
 
-    async def fake_get(url, **kwargs):
+    The fetch/merge/format logic itself now lives in bolster.utils.calendars,
+    which fetches synchronously via bolster.utils.web.session (a
+    requests.Session). Patching session.get here — rather than an httpx
+    client in this repo — is what actually exercises check_availability's
+    wiring into that shared library.
+    """
+
+    def fake_get(url, **kwargs):
         return make_httpx_response(content=ics_bodies[url].encode())
 
-    mock_client.get = AsyncMock(side_effect=fake_get)
-    return mock_client
+    return fake_get
 
 
 def _b64_calendars_json(payload: dict) -> str:
@@ -193,8 +196,8 @@ class TestAvailabilityTool:
     @pytest.mark.asyncio
     async def test_anonymous_sees_free_busy_only(self, monkeypatch):
         monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
-        with patch("availability.httpx.AsyncClient") as mock_client_cls:
-            mock_client_cls.return_value = make_ics_client_mock({"https://example.com/work.ics": self.BUSY_ICAL})
+        get = mock_calendar_session_get({"https://example.com/work.ics": self.BUSY_ICAL})
+        with patch("bolster.utils.calendars.session.get", side_effect=get):
             async with Client(mcp) as client:
                 result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 7})
                 assert "BUSY" in result.data
@@ -208,8 +211,8 @@ class TestAvailabilityTool:
         monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
         token = auth_context_var.set(fake_login("andrewbolster"))
         try:
-            with patch("availability.httpx.AsyncClient") as mock_client_cls:
-                mock_client_cls.return_value = make_ics_client_mock({"https://example.com/work.ics": self.BUSY_ICAL})
+            get = mock_calendar_session_get({"https://example.com/work.ics": self.BUSY_ICAL})
+            with patch("bolster.utils.calendars.session.get", side_effect=get):
                 async with Client(mcp_auth) as client:
                     result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 7})
                     assert "Team Meeting" in result.data
@@ -220,17 +223,17 @@ class TestAvailabilityTool:
     @pytest.mark.asyncio
     async def test_no_busy_time_found(self, monkeypatch):
         monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
-        with patch("availability.httpx.AsyncClient") as mock_client_cls:
-            mock_client_cls.return_value = make_ics_client_mock({"https://example.com/work.ics": self.EMPTY_ICAL})
+        get = mock_calendar_session_get({"https://example.com/work.ics": self.EMPTY_ICAL})
+        with patch("bolster.utils.calendars.session.get", side_effect=get):
             async with Client(mcp) as client:
                 result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 7})
-                assert "fully free" in result.data
+                assert "free all day" in result.data
 
     @pytest.mark.asyncio
     async def test_default_parameters(self, monkeypatch):
         monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
-        with patch("availability.httpx.AsyncClient") as mock_client_cls:
-            mock_client_cls.return_value = make_ics_client_mock({"https://example.com/work.ics": self.EMPTY_ICAL})
+        get = mock_calendar_session_get({"https://example.com/work.ics": self.EMPTY_ICAL})
+        with patch("bolster.utils.calendars.session.get", side_effect=get):
             async with Client(mcp) as client:
                 result = await client.call_tool("check_availability", {})
                 assert "Availability" in result.data
@@ -238,16 +241,13 @@ class TestAvailabilityTool:
     @pytest.mark.asyncio
     async def test_http_error_from_one_calendar_does_not_crash_the_tool(self, monkeypatch):
         monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(side_effect=httpx.RequestError("Connection refused"))
-        with patch("availability.httpx.AsyncClient") as mock_client_cls:
-            mock_client_cls.return_value = mock_client
+        with patch(
+            "bolster.utils.calendars.session.get", side_effect=requests.exceptions.ConnectionError("Connection refused")
+        ):
             async with Client(mcp) as client:
                 result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 3})
                 # one calendar failing to fetch degrades to "no data from it", not a tool error
-                assert "fully free" in result.data
+                assert "free all day" in result.data
 
     @pytest.mark.asyncio
     async def test_all_day_events(self, monkeypatch):
@@ -261,8 +261,8 @@ class TestAvailabilityTool:
         monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
         token = auth_context_var.set(fake_login("andrewbolster"))
         try:
-            with patch("availability.httpx.AsyncClient") as mock_client_cls:
-                mock_client_cls.return_value = make_ics_client_mock({"https://example.com/work.ics": ical})
+            get = mock_calendar_session_get({"https://example.com/work.ics": ical})
+            with patch("bolster.utils.calendars.session.get", side_effect=get):
                 async with Client(mcp_auth) as client:
                     result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 7})
                     assert "Conference Day" in result.data
@@ -437,9 +437,8 @@ class TestIntegration:
             )
             assert "Message received" in contact.data
 
-            with patch("availability.httpx.AsyncClient") as mock_client_cls:
-                mock_client_cls.return_value = make_ics_client_mock({"https://example.com/work.ics": empty_ical})
-
+            get = mock_calendar_session_get({"https://example.com/work.ics": empty_ical})
+            with patch("bolster.utils.calendars.session.get", side_effect=get):
                 avail = await client.call_tool("check_availability", {})
                 assert "Availability" in avail.data
 
@@ -525,62 +524,12 @@ class TestAuthMount:
             auth_context_var.reset(token)
 
 
-def _vevent(*extra_lines: str):
-    """Parse a minimal VEVENT with the given extra property lines, for event_severity tests."""
-    from icalendar import Calendar as ICalendar
-
-    body = "\r\n".join(
-        [
-            "BEGIN:VCALENDAR",
-            "VERSION:2.0",
-            "BEGIN:VEVENT",
-            "UID:1",
-            "DTSTART:20241202T100000Z",
-            "DTEND:20241202T110000Z",
-            "SUMMARY:Event",
-            *extra_lines,
-            "END:VEVENT",
-            "END:VCALENDAR",
-        ]
-    )
-    return ICalendar.from_ical(body).walk("VEVENT")[0]
-
-
 class TestAvailabilityModule:
-    """Direct unit tests for availability.py's pure logic — no HTTP, no MCP client."""
+    """Direct unit tests for availability.py's own logic — secret loading only.
 
-    def test_event_severity_transparent_is_free(self):
-        assert availability.event_severity(_vevent("TRANSP:TRANSPARENT")) == availability.FREE
-
-    def test_event_severity_ms_busystatus_free(self):
-        assert availability.event_severity(_vevent("X-MICROSOFT-CDO-BUSYSTATUS:FREE")) == availability.FREE
-
-    def test_event_severity_ms_busystatus_tentative(self):
-        assert availability.event_severity(_vevent("X-MICROSOFT-CDO-BUSYSTATUS:TENTATIVE")) == availability.TENTATIVE
-
-    def test_event_severity_ms_busystatus_oof_is_busy(self):
-        assert availability.event_severity(_vevent("X-MICROSOFT-CDO-BUSYSTATUS:OOF")) == availability.BUSY
-
-    def test_event_severity_status_tentative(self):
-        assert availability.event_severity(_vevent("STATUS:TENTATIVE")) == availability.TENTATIVE
-
-    def test_event_severity_status_cancelled_is_free(self):
-        assert availability.event_severity(_vevent("STATUS:CANCELLED")) == availability.FREE
-
-    def test_event_severity_partstat_declined_is_free(self):
-        assert (
-            availability.event_severity(_vevent("ATTENDEE;PARTSTAT=DECLINED:mailto:andrew.bolster@gmail.com"))
-            == availability.FREE
-        )
-
-    def test_event_severity_partstat_tentative(self):
-        assert (
-            availability.event_severity(_vevent("ATTENDEE;PARTSTAT=TENTATIVE:mailto:andrew.bolster@gmail.com"))
-            == availability.TENTATIVE
-        )
-
-    def test_event_severity_defaults_to_busy(self):
-        assert availability.event_severity(_vevent()) == availability.BUSY
+    The fetch/severity/merge/format logic lives in bolster.utils.calendars
+    now, and is tested there — see bolster's tests/test_utils_calendars.py.
+    """
 
     def test_load_calendars_missing_env_var(self, monkeypatch):
         monkeypatch.delenv(availability.CALENDARS_ENV_VAR, raising=False)
@@ -608,83 +557,6 @@ class TestAvailabilityModule:
             _b64_calendars_json({"calendars": [{"name": "work", "url": "https://x/y.ics"}]}),
         )
         assert availability.load_calendars() == [{"name": "work", "url": "https://x/y.ics"}]
-
-    def test_merge_timeline_busy_wins_over_overlapping_tentative(self):
-        tz = ZoneInfo("Europe/London")
-        window_start = datetime(2024, 12, 2, 9, 0, tzinfo=tz)
-        window_end = datetime(2024, 12, 2, 12, 0, tzinfo=tz)
-        intervals = [
-            availability.Interval(
-                datetime(2024, 12, 2, 10, 0, tzinfo=tz),
-                datetime(2024, 12, 2, 11, 0, tzinfo=tz),
-                availability.TENTATIVE,
-                "personal",
-                "Maybe",
-            ),
-            availability.Interval(
-                datetime(2024, 12, 2, 10, 30, tzinfo=tz),
-                datetime(2024, 12, 2, 11, 30, tzinfo=tz),
-                availability.BUSY,
-                "work",
-                "Definitely",
-            ),
-        ]
-        merged = availability.merge_timeline(intervals, window_start, window_end)
-        severities = {seg.severity for seg in merged}
-        assert availability.BUSY in severities
-        # the overlapping window (10:30-11:00) must resolve to BUSY, not TENTATIVE
-        overlap_segments = [s for s in merged if s.start < datetime(2024, 12, 2, 11, 0, tzinfo=tz) <= s.end]
-        assert all(
-            s.severity == availability.BUSY
-            for s in overlap_segments
-            if s.start >= datetime(2024, 12, 2, 10, 30, tzinfo=tz)
-        )
-
-    def test_merge_timeline_adjacent_same_severity_segments_merge(self):
-        tz = ZoneInfo("Europe/London")
-        window_start = datetime(2024, 12, 2, 9, 0, tzinfo=tz)
-        window_end = datetime(2024, 12, 2, 12, 0, tzinfo=tz)
-        intervals = [
-            availability.Interval(
-                datetime(2024, 12, 2, 10, 0, tzinfo=tz),
-                datetime(2024, 12, 2, 10, 30, tzinfo=tz),
-                availability.BUSY,
-                "work",
-                "First",
-            ),
-            availability.Interval(
-                datetime(2024, 12, 2, 10, 30, tzinfo=tz),
-                datetime(2024, 12, 2, 11, 0, tzinfo=tz),
-                availability.BUSY,
-                "work",
-                "First",
-            ),
-        ]
-        merged = availability.merge_timeline(intervals, window_start, window_end)
-        assert len(merged) == 1
-        assert merged[0].start == datetime(2024, 12, 2, 10, 0, tzinfo=tz)
-        assert merged[0].end == datetime(2024, 12, 2, 11, 0, tzinfo=tz)
-
-    def test_format_timeline_detailed_vs_not(self):
-        tz = ZoneInfo("Europe/London")
-        window_start = datetime(2024, 12, 2, 9, 0, tzinfo=tz)
-        window_end = datetime(2024, 12, 2, 12, 0, tzinfo=tz)
-        merged = [
-            availability.Interval(
-                datetime(2024, 12, 2, 10, 0, tzinfo=tz),
-                datetime(2024, 12, 2, 10, 30, tzinfo=tz),
-                availability.BUSY,
-                "work",
-                "Secret Meeting",
-            )
-        ]
-        detailed = availability.format_timeline(merged, window_start, window_end, detailed=True)
-        plain = availability.format_timeline(merged, window_start, window_end, detailed=False)
-        assert "Secret Meeting" in detailed
-        assert "work" in detailed
-        assert "Secret Meeting" not in plain
-        assert "[work]" not in plain
-        assert "free/busy only" in plain
 
 
 if __name__ == "__main__":
