@@ -43,6 +43,7 @@ This is a fully-featured MCP (Model Context Protocol) server providing curated r
 - `send_contact_message(message, sender)` - Contact tool with email integration placeholder
 - `check_availability(start_date, days_ahead)` - Merged free/busy across multiple private ICS calendars (`availability.py`), configured via `CALENDARS_CONFIG_JSON`; full detail for Andrew (authenticated), free/busy only for everyone else
 - `get_recent_blog_posts(limit)` - Fetch recent posts from RSS feed (max 10)
+- `get_blog_post_content(url)` - Fetch the full text of one post as markdown, via Hugo's `index.md` alternate; andrewbolster.info URLs only
 
 > For the current tool list, read `app.py` — all `@mcp.tool()` decorated functions are tools.
 

@@ -36,6 +36,7 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 - **Contact Tool** - Send professional inquiries (placeholder implementation)
 - **Availability Tool** - Merged free/busy across multiple private calendars, with two response tiers: full detail (which calendar, event title) for Andrew, authenticated via `/auth/mcp`; free/busy-only for everyone else, including anonymous callers on the public `/mcp` endpoint
 - **Blog Posts Tool** - Fetch recent posts from RSS feed
+- **Blog Post Content Tool** - Fetch the full text of one post as markdown (andrewbolster.info only)
 
 ### Development Features
 
