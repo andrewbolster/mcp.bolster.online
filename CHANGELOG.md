@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.1] - 2026-09-06
+## \[0.2.1\] - 2026-09-06
 
 - refactor: generalize get_blog_post_content to get_page_content (#30)
 - feat: add get_blog_post_content tool (#29)
@@ -14,7 +14,6 @@
 - feat: reload nginx automatically during deploy
 - fix: allow OAuth discovery paths through nginx's dotfile block
 - feat: add GitHub-authenticated /auth/mcp endpoint alongside /mcp
-
 
 ## \[0.2.0\] - 2026-08-30
 
