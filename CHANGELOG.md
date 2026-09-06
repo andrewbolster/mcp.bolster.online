@@ -1,5 +1,22 @@
 # Changelog
 
+## \[0.2.3\] - 2026-09-06
+
+- fix: remove double blank line left by release-logic.yml's changelog writer (#34)
+- fix: escape changelog version headers for mdformat compliance (#32)
+- refactor: generalize get_blog_post_content to get_page_content (#30)
+- feat: add get_blog_post_content tool (#29)
+- feat: rewire availability.py onto bolster.utils.calendars (#28)
+- fix(deps): bump cryptography 48.0.1 -> 50.0.1 (GHSA-g6cj-pr64-35w5)
+- fix: base64-encode CALENDARS_CONFIG_JSON — systemd strips embedded quotes
+- feat: real multi-calendar availability with owner/anonymous tiers
+- feat: add whoami tool to the authenticated MCP endpoint
+- fix: own the full /auth/mcp path in FastMCP instead of double-prefixing
+- fix: add CORS middleware so unmatched-route 404s don't break browser OAuth
+- feat: reload nginx automatically during deploy
+- fix: allow OAuth discovery paths through nginx's dotfile block
+- feat: add GitHub-authenticated /auth/mcp endpoint alongside /mcp
+
 ## \[0.2.2\] - 2026-09-06
 
 - fix: escape changelog version headers for mdformat compliance (#32)
