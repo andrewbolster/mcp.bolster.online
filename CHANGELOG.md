@@ -16,7 +16,6 @@
 - fix: allow OAuth discovery paths through nginx's dotfile block
 - feat: add GitHub-authenticated /auth/mcp endpoint alongside /mcp
 
-
 ## \[0.2.1\] - 2026-09-06
 
 - refactor: generalize get_blog_post_content to get_page_content (#30)
