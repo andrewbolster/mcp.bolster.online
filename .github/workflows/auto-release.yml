@@ -25,7 +25,7 @@ jobs:
         uses: andrewbolster/bolster/.github/workflows/release-logic.yml@main
         with:
             version_bump: ${{ inputs.version_bump || 'auto' }}
-            block_minor: false
+            block_major: false
             package_name: mcp-bolster-online
         # release-logic.yml auto-merges patch-bump PRs using BOLSTER_TOKEN
         # (andrewbolster/bolster#2087) — a named secret on a cross-repo
