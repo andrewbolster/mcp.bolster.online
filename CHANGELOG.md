@@ -1,5 +1,9 @@
 # Changelog
 
+## \[0.2.4\] - 2026-09-27
+
+- fix: reformat tool-call validation errors for small tool-calling models (#39)
+
 ## \[0.2.3\] - 2026-09-06
 
 - fix: remove double blank line left by release-logic.yml's changelog writer (#34)
