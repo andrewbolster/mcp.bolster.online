@@ -226,3 +226,4 @@ jobs:
         path: benchmark-results.json
         retention-days: 30
 # same-ref cancellation verification 1790519762
+# re-trigger for cross-ref overlap test 1790519912
