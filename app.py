@@ -6,14 +6,29 @@ This MCP server provides curated resources and links about Andrew Bolster,
 a Northern Ireland-based technology researcher, data scientist, and community builder.
 """
 
+import contextlib
+import os
 import re
-import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
-from typing import Annotated, Any
+from datetime import datetime
+from typing import Annotated
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+from defusedxml import (
+    ElementTree as ET,  # noqa: N817 — matches stdlib's own ET convention
+)
 from fastmcp import Context, FastMCP
+from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.dependencies import get_access_token
+from fastmcp.server.middleware import AuthMiddleware
+from fastmcp.server.middleware.authorization import AuthContext
 from fastmcp.tools.tool import ToolAnnotations
+from starlette.applications import Starlette
+from starlette.middleware import Middleware as StarletteMiddleware
+from starlette.middleware.cors import CORSMiddleware
+from starlette.routing import Mount
+
+from availability import AvailabilityNotConfiguredError, get_availability
 
 # Initialize the MCP server
 mcp = FastMCP(
@@ -275,113 +290,38 @@ Note: This is currently a placeholder implementation. The message has been logge
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def check_availability(
     ctx: Context,
-    start_date: Annotated[
-        str | None, "Start date in YYYY-MM-DD format (defaults to today)"
-    ] = None,
+    start_date: Annotated[str | None, "Start date in YYYY-MM-DD format (defaults to today)"] = None,
     days_ahead: Annotated[int, "Number of days to check ahead"] = 7,
 ) -> str:
-    """Check Andrew Bolster's calendar availability using his public iCal feed."""
+    """Check Andrew Bolster's availability, merged across his calendars.
+
+    Callers authenticated via /auth/mcp see which calendar and event title
+    is behind each busy/tentative block. Everyone else — including
+    anonymous callers on the public /mcp endpoint — sees only plain
+    free/busy/tentative time ranges, with no calendar source or event
+    content.
+    """
+    token = get_access_token()
+    # This tool is mounted on both mcp (public, no auth) and mcp_auth
+    # (GitHub-authenticated, gated by require_allowed_login on
+    # GITHUB_ALLOWED_LOGINS). A non-None token here means AuthMiddleware
+    # already confirmed the caller's login is on that allowlist before this
+    # tool ever ran — no need to re-check the login against anything.
+    is_owner = token is not None
+
+    await ctx.info(f"Checking availability from {start_date or 'today'} for {days_ahead} days (detailed={is_owner})")
+
     try:
-        if start_date:
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        else:
-            start_dt = datetime.now()
-
-        end_dt = start_dt + timedelta(days=days_ahead)
-        await ctx.info(
-            f"Checking availability from {start_dt.date()} for {days_ahead} days"
-        )
-
-        ical_url = "https://calendar.google.com/calendar/ical/andrew.bolster%40gmail.com/public/basic.ics"
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(ical_url)
-            response.raise_for_status()
-
-        ical_content = response.text
-        events: list[dict[str, Any]] = []
-        current_event: dict[str, Any] = {}
-
-        for line in ical_content.split("\n"):
-            line = line.strip()
-            if line == "BEGIN:VEVENT":
-                current_event = {}
-            elif line == "END:VEVENT":
-                if current_event:
-                    events.append(current_event.copy())
-                current_event = {}
-            elif line.startswith("DTSTART"):
-                dt_match = re.search(r"DTSTART[^:]*:(\d{8}T?\d{0,6}Z?)", line)
-                if dt_match:
-                    dt_str = dt_match.group(1)
-                    try:
-                        if "T" in dt_str:
-                            if dt_str.endswith("Z"):
-                                dt = datetime.strptime(dt_str, "%Y%m%dT%H%M%SZ")
-                            else:
-                                dt = datetime.strptime(dt_str, "%Y%m%dT%H%M%S")
-                        else:
-                            dt = datetime.strptime(dt_str, "%Y%m%d")
-                        current_event["start"] = dt
-                    except ValueError:
-                        pass
-            elif line.startswith("DTEND"):
-                dt_match = re.search(r"DTEND[^:]*:(\d{8}T?\d{0,6}Z?)", line)
-                if dt_match:
-                    dt_str = dt_match.group(1)
-                    try:
-                        if "T" in dt_str:
-                            if dt_str.endswith("Z"):
-                                dt = datetime.strptime(dt_str, "%Y%m%dT%H%M%SZ")
-                            else:
-                                dt = datetime.strptime(dt_str, "%Y%m%dT%H%M%S")
-                        else:
-                            dt = datetime.strptime(dt_str, "%Y%m%d")
-                        current_event["end"] = dt
-                    except ValueError:
-                        pass
-            elif line.startswith("SUMMARY"):
-                current_event["summary"] = line.split(":", 1)[1] if ":" in line else ""
-
-        relevant_events = [
-            event
-            for event in events
-            if "start" in event
-            and "end" in event
-            and isinstance(event["start"], datetime)
-            and isinstance(event["end"], datetime)
-            and event["start"] <= end_dt
-            and event["end"] >= start_dt
-        ]
-
-        await ctx.info(f"Found {len(relevant_events)} events in range")
-
-        if not relevant_events:
-            return f"""Calendar availability for {start_dt.strftime("%Y-%m-%d")} to {end_dt.strftime("%Y-%m-%d")}:
-
-✅ No scheduled events found in the public calendar for this period.
-
-Note: This shows only publicly visible calendar events. Private events and detailed scheduling should be confirmed directly."""
-
-        event_list = []
-        for event in sorted(relevant_events, key=lambda x: x["start"]):
-            start_str = event["start"].strftime("%Y-%m-%d %H:%M")
-            end_str = event["end"].strftime("%Y-%m-%d %H:%M")
-            summary = event.get("summary", "Busy")
-            event_list.append(f"  📅 {start_str} - {end_str}: {summary}")
-
-        return f"""Calendar availability for {start_dt.strftime("%Y-%m-%d")} to {end_dt.strftime("%Y-%m-%d")}:
-
-⚠️  Scheduled events found:
-{chr(10).join(event_list)}
-
-Note: This shows only publicly visible calendar events. For detailed scheduling or to check additional availability, please use the contact tool to reach out directly."""
-
+        return await get_availability(start_date=start_date, days_ahead=days_ahead, detailed=is_owner)
+    except AvailabilityNotConfiguredError as e:
+        await ctx.warning(f"Availability not configured: {e}")
+        return "Availability checking isn't configured on this server yet. Please contact directly."
     except httpx.HTTPError as e:
         await ctx.warning(f"HTTP error fetching calendar: {e}")
-        return f"Error fetching calendar data: {str(e)}. Please try again later or contact directly."
+        return f"Error fetching calendar data: {e}. Please try again later or contact directly."
     except Exception as e:
         await ctx.warning(f"Unexpected error in check_availability: {e}")
-        return f"Error processing calendar information: {str(e)}. Please contact directly for availability."
+        return f"Error processing calendar information: {e}. Please contact directly for availability."
 
 
 class BlogPost(dict):  # type: ignore[type-arg]
@@ -421,15 +361,9 @@ async def get_recent_blog_posts(
             description_elem = item.find("description")
             pub_date_elem = item.find("pubDate")
 
-            title = (
-                (title_elem.text or "No title")
-                if title_elem is not None
-                else "No title"
-            )
+            title = (title_elem.text or "No title") if title_elem is not None else "No title"
             link = (link_elem.text or "") if link_elem is not None else ""
-            description = (
-                (description_elem.text or "") if description_elem is not None else ""
-            )
+            description = (description_elem.text or "") if description_elem is not None else ""
             pub_date = (pub_date_elem.text or "") if pub_date_elem is not None else ""
 
             # Strip HTML tags and truncate
@@ -437,9 +371,7 @@ async def get_recent_blog_posts(
             if len(description) > 500:
                 description = description[:497] + "..."
 
-            posts.append(
-                BlogPost(title=title, date=pub_date, url=link, summary=description)
-            )
+            posts.append(BlogPost(title=title, date=pub_date, url=link, summary=description))
 
         await ctx.info(f"Returning {len(posts)} posts")
         return posts
@@ -455,16 +387,176 @@ async def get_recent_blog_posts(
         return []
 
 
+SITE_DOMAIN = "andrewbolster.info"
+MAX_PAGE_CHARS = 50_000
+
+
+def _site_markdown_url(url: str) -> str:
+    """Convert a page URL to its markdown-alternate URL.
+
+    Hugo publishes a `text/markdown` alternate (frontmatter + body, internal
+    links already relativized) for every blog post and most static pages
+    (about, now, ideas, archives, resume, ...) at `<page-url>/index.md` —
+    confirmed live across content from 2010 through 2026. A handful of page
+    types don't get one (list/taxonomy pages like /tags/) and 404 instead;
+    the caller handles that gracefully rather than this function trying to
+    predict it. Restricting to exactly SITE_DOMAIN (no subdomain match, no
+    other host) is what keeps this tool from becoming a general-purpose URL
+    fetcher.
+
+    Raises:
+        ValueError: If url isn't an http(s) URL on SITE_DOMAIN.
+    """
+    parsed = urlsplit(url)
+    if parsed.scheme not in ("http", "https") or parsed.hostname != SITE_DOMAIN:
+        raise ValueError(f"only https://{SITE_DOMAIN} URLs are supported, got: {url!r}")
+    path = parsed.path if parsed.path.endswith("/") else parsed.path + "/"
+    return urlunsplit(("https", SITE_DOMAIN, path + "index.md", "", ""))
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_page_content(
+    ctx: Context,
+    url: Annotated[str, "A page URL on andrewbolster.info, e.g. from get_recent_blog_posts' results"],
+) -> str:
+    """Fetch the full content of one andrewbolster.info page, as markdown.
+
+    Works for blog posts and most static pages (About, Now, Ideas, Archives,
+    Resume, ...). Only works for URLs on andrewbolster.info —
+    get_recent_blog_posts only returns summaries; use this tool for the full
+    text of a specific post or page.
+    """
+    try:
+        markdown_url = _site_markdown_url(url)
+    except ValueError as e:
+        await ctx.warning(str(e))
+        return f"Can't fetch that URL: {e}"
+
+    await ctx.info(f"Fetching page content from {markdown_url}")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(markdown_url)
+            response.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        await ctx.warning(f"Page not found: {e}")
+        return f"Couldn't find that page (HTTP {e.response.status_code})."
+    except httpx.HTTPError as e:
+        await ctx.warning(f"HTTP error fetching page: {e}")
+        return f"Error fetching page content: {e}"
+
+    text = response.text
+    if len(text) > MAX_PAGE_CHARS:
+        text = text[:MAX_PAGE_CHARS] + "\n\n... (truncated)"
+    return text
+
+
 try:
     from bolster.cli import cli as _bolster_cli
 
     from click_mcp import register_click_commands
 
-    register_click_commands(
-        mcp, _bolster_cli, prefix="bolster", exclude={"list-sources"}
-    )
+    register_click_commands(mcp, _bolster_cli, prefix="bolster", exclude={"list-sources"})
 except ImportError:
     pass
+
+
+def require_allowed_login(ctx: AuthContext) -> bool:
+    """Restrict every mounted tool/resource to logins in GITHUB_ALLOWED_LOGINS.
+
+    GitHubProvider authenticates any GitHub account; this is the separate
+    check for *which* accounts. Empty/unset GITHUB_ALLOWED_LOGINS allows no
+    one, rather than everyone, so a misconfigured host fails closed.
+    """
+    if ctx.token is None:
+        return False
+    allowed = {login.strip() for login in os.environ.get("GITHUB_ALLOWED_LOGINS", "").split(",") if login.strip()}
+    return ctx.token.claims.get("login") in allowed
+
+
+# mcp_auth exposes exactly the same tools/resources as mcp, live via mount()
+# rather than redefined — nothing here can drift from the public server.
+# Auth-scoped tools (memory, private data) are added to mcp_auth later.
+#
+# base_url is the bare origin, and http_app(path="/auth/mcp") below tells
+# FastMCP the full external path directly, rather than base_url carrying
+# "/auth/mcp" *and* an outer Starlette Mount("/auth/mcp", ...) adding it
+# again. FastMCP's own resource-URL computation (auth.py's
+# _get_resource_url) appends its own `path` on top of base_url — with the
+# old double-prefixed shape that always produced a trailing slash on the
+# declared OAuth "resource" identifier (".../auth/mcp/") no matter what was
+# configured, which real MCP clients then rejected: they compute their own
+# "requested resource" from whatever URL a user typed (usually without a
+# trailing slash) and require an exact prefix match against what the server
+# declares. With the path owned in one place, the declared resource is
+# exactly "https://mcp.bolster.online/auth/mcp" — no slash, matching how
+# anyone would naturally type it. It also collapses the OAuth issuer to the
+# site root, so RFC 8414 discovery is the plain, single-candidate form
+# instead of the path-aware-with-fallback form — simpler, and avoids an
+# unmatched-route discovery probe entirely rather than just handling it.
+mcp_auth = FastMCP(
+    name="Andrew Bolster Resources (auth)",
+    auth=GitHubProvider(
+        client_id=os.environ.get("GITHUB_CLIENT_ID", ""),
+        client_secret=os.environ.get("GITHUB_CLIENT_SECRET", ""),
+        base_url="https://mcp.bolster.online",
+    ),
+    middleware=[AuthMiddleware(auth=require_allowed_login)],
+)
+mcp_auth.mount(mcp, namespace=None)
+
+
+@mcp_auth.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def whoami() -> str:
+    """Report the authenticated GitHub identity making this request."""
+    token = get_access_token()
+    if token is None:
+        return "Not authenticated."
+    login = token.claims.get("login", "unknown")
+    name = token.claims.get("name")
+    return f"Signed in as {login}" + (f" ({name})" if name else "")
+
+
+# Deployed via uvicorn (`uvicorn app:app`), not `fastmcp run`, since the
+# latter only knows how to serve a single bare FastMCP object and this repo
+# now needs two, composed under one ASGI app. nginx already proxies both
+# paths to this one process unchanged.
+_mcp_http_app = mcp.http_app(path="/")
+_mcp_auth_http_app = mcp_auth.http_app(path="/auth/mcp")
+
+
+@contextlib.asynccontextmanager
+async def _combined_lifespan(starlette_app: Starlette):
+    # Each http_app() owns its own StreamableHTTPSessionManager task group;
+    # skipping either lifespan surfaces as a 500 ("Task group is not
+    # initialized") on first request to that mount, not at startup.
+    async with _mcp_http_app.lifespan(starlette_app), _mcp_auth_http_app.lifespan(starlette_app):
+        yield
+
+
+# _mcp_auth_http_app already owns its full external paths (/auth/mcp for
+# the MCP endpoint, /authorize, /token, /register, /auth/callback, /consent,
+# /.well-known/* — all root-relative, since base_url is the bare origin
+# above), so it's mounted at "/" rather than wrapped in another prefix.
+# /mcp must be listed first: Starlette tries routes in order, and a root
+# mount would otherwise swallow it. CORSMiddleware guards against a
+# now-mostly-theoretical unmatched-route discovery probe still returning a
+# CORS-header-less 404, which real browsers (unlike curl or Node) treat as
+# a hard failure rather than a normal 4xx to fall back from.
+app = Starlette(
+    routes=[
+        Mount("/mcp", app=_mcp_http_app),
+        Mount("/", app=_mcp_auth_http_app),
+    ],
+    middleware=[
+        StarletteMiddleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    ],
+    lifespan=_combined_lifespan,
+)
 
 
 if __name__ == "__main__":

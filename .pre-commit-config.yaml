@@ -8,18 +8,26 @@ repos:
         exclude: ^deployment/
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.8
+    # Kept in exact sync with the ruff dev dependency in pyproject.toml, so
+    # `uv run ruff`, this hook, and CI's `pre-commit run --all-files` are
+    # provably the same binary.
+    rev: v0.16.5
     hooks:
       - id: ruff
         args: [--fix]
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.11.0
+    rev: v2.3.1
     hooks:
       - id: mypy
         additional_dependencies: [types-requests]
         args: [--ignore-missing-imports]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -27,13 +35,13 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+      - id: check-toml
+      - id: check-json
       - id: check-added-large-files
       - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-byte-order-marker
       - id: debug-statements
-
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
-    hooks:
       - id: detect-private-key
 
   - repo: local

@@ -50,6 +50,18 @@ else
     log_message "WARNING: WEBHOOK_SECRET not set, skipping secret injection"
 fi
 
+# /etc/nginx/sites-available/mcp.bolster.online is a symlink to
+# deployment/nginx/mcp.bolster.online in this repo, so the git reset above
+# already updated the file nginx reads — it just doesn't know to re-read it.
+# `nginx -t` validates before reloading, so a bad config is caught here and
+# left running the old (working) config rather than breaking the site.
+log_message "Reloading nginx configuration"
+if sudo nginx -t; then
+    sudo systemctl reload nginx || log_message "WARNING: nginx reload failed"
+else
+    log_message "WARNING: nginx config test failed, skipping reload — old config still active"
+fi
+
 # Redirect all cache dirs to writable location (ProtectSystem=strict makes /var/www/.cache read-only)
 export XDG_CACHE_HOME="/opt/mcp.bolster.online/.cache"
 export UV_CACHE_DIR="/opt/mcp.bolster.online/.cache/uv"

@@ -5,15 +5,33 @@ Test suite for Andrew Bolster MCP Resources Server
 Tests both resources and tools using FastMCP in-memory testing patterns.
 """
 
+import base64
 import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+import requests
 from fastmcp import Client
+from fastmcp.server.auth.auth import AccessToken
+from mcp.server.auth.middleware.auth_context import auth_context_var
+from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 
-from app import mcp
+import availability
+from app import MAX_PAGE_CHARS, mcp, mcp_auth
+
+
+def fake_login(login: str) -> AuthenticatedUser:
+    """Simulate a verified GitHub session carrying the given login.
+
+    Mirrors what GitHubTokenVerifier produces from a real OAuth token: an
+    AuthenticatedUser wrapping an AccessToken whose claims include "login".
+    Setting this on auth_context_var (the same ContextVar the MCP SDK's own
+    auth middleware populates from a real bearer token) lets AuthMiddleware
+    see an authenticated caller without driving a real OAuth round trip.
+    """
+    return AuthenticatedUser(AccessToken(token="test-token", client_id="123", scopes=[], claims={"login": login}))
 
 
 def get_posts(result) -> list:
@@ -25,9 +43,7 @@ def get_posts(result) -> list:
     return json.loads(result.content[0].text)
 
 
-def make_httpx_response(
-    text: str = "", content: bytes = b"", status_code: int = 200
-) -> MagicMock:
+def make_httpx_response(text: str = "", content: bytes = b"", status_code: int = 200) -> MagicMock:
     """Build a mock httpx.Response."""
     mock = MagicMock(spec=httpx.Response)
     mock.text = text
@@ -48,9 +64,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_personal_website_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/personal-website"
-            )
+            result = await client.read_resource("resource://andrew-bolster/personal-website")
             content = result[0].text
             assert "Andrew Bolster - Personal Website" in content
             assert "https://andrewbolster.info/" in content
@@ -59,9 +73,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_professional_profile_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/professional-profile"
-            )
+            result = await client.read_resource("resource://andrew-bolster/professional-profile")
             content = result[0].text
             assert "Andrew Bolster - Professional Profile" in content
             assert "BSides Belfast" in content
@@ -79,9 +91,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_social_media_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/social-media"
-            )
+            result = await client.read_resource("resource://andrew-bolster/social-media")
             content = result[0].text
             assert isinstance(content, str)
             assert "https://" in content
@@ -89,9 +99,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_research_interests_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/research-interests"
-            )
+            result = await client.read_resource("resource://andrew-bolster/research-interests")
             content = result[0].text
             assert "Generative AI" in content
             assert "autonomous underwater vehicles" in content
@@ -99,9 +107,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_community_involvement_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/community-involvement"
-            )
+            result = await client.read_resource("resource://andrew-bolster/community-involvement")
             content = result[0].text
             assert isinstance(content, str)
             assert "#" in content
@@ -109,9 +115,7 @@ class TestResources:
     @pytest.mark.asyncio
     async def test_technical_blog_resource(self):
         async with Client(mcp) as client:
-            result = await client.read_resource(
-                "resource://andrew-bolster/technical-blog"
-            )
+            result = await client.read_resource("resource://andrew-bolster/technical-blog")
             content = result[0].text
             assert "https://andrewbolster.info/blog/" in content
             assert "PhD diary entries" in content
@@ -133,9 +137,7 @@ class TestContactTool:
     @pytest.mark.asyncio
     async def test_send_contact_message_empty_fields(self):
         async with Client(mcp) as client:
-            result = await client.call_tool(
-                "send_contact_message", {"message": "", "sender": "Test User"}
-            )
+            result = await client.call_tool("send_contact_message", {"message": "", "sender": "Test User"})
             assert "Length: 0 characters" in result.data
 
     @pytest.mark.asyncio
@@ -149,142 +151,123 @@ class TestContactTool:
             assert str(datetime.now().year) in result.data
 
 
+def mock_calendar_session_get(ics_bodies: dict[str, str]):
+    """Build a side_effect for bolster.utils.calendars.session.get, keyed by URL.
+
+    The fetch/merge/format logic itself now lives in bolster.utils.calendars,
+    which fetches synchronously via bolster.utils.web.session (a
+    requests.Session). Patching session.get here — rather than an httpx
+    client in this repo — is what actually exercises check_availability's
+    wiring into that shared library.
+    """
+
+    def fake_get(url, **kwargs):
+        return make_httpx_response(content=ics_bodies[url].encode())
+
+    return fake_get
+
+
+def _b64_calendars_json(payload: dict) -> str:
+    """Base64-encode a {"calendars": [...]} config, matching production's CALENDARS_CONFIG_JSON_B64."""
+    return base64.b64encode(json.dumps(payload).encode()).decode()
+
+
 class TestAvailabilityTool:
-    @pytest.mark.asyncio
-    async def test_check_availability_no_events(self):
-        mock_response = make_httpx_response(
-            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
-        )
-        with patch("app.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
+    """check_availability's two response tiers: owner (detailed) vs everyone else (free/busy only)."""
 
+    CALENDARS_JSON = _b64_calendars_json({"calendars": [{"name": "work", "url": "https://example.com/work.ics"}]})
+
+    EMPTY_ICAL = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR"
+
+    BUSY_ICAL = (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+        "BEGIN:VEVENT\r\nUID:1\r\nDTSTART:20241202T100000Z\r\nDTEND:20241202T110000Z\r\n"
+        "SUMMARY:Team Meeting\r\nEND:VEVENT\r\n"
+        "END:VCALENDAR"
+    )
+
+    @pytest.mark.asyncio
+    async def test_not_configured(self, monkeypatch):
+        monkeypatch.delenv(availability.CALENDARS_ENV_VAR, raising=False)
+        async with Client(mcp) as client:
+            result = await client.call_tool("check_availability", {})
+            assert "isn't configured" in result.data
+
+    @pytest.mark.asyncio
+    async def test_anonymous_sees_free_busy_only(self, monkeypatch):
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
+        get = mock_calendar_session_get({"https://example.com/work.ics": self.BUSY_ICAL})
+        with patch("bolster.utils.calendars.session.get", side_effect=get):
             async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
-                )
-                assert "No scheduled events found" in result.data
-                assert "2024-12-01" in result.data
+                result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 7})
+                assert "BUSY" in result.data
+                assert "Team Meeting" not in result.data, "anonymous callers must not see event titles"
+                assert "work" not in result.data, "anonymous callers must not see which calendar"
+                assert "free/busy only" in result.data
 
     @pytest.mark.asyncio
-    async def test_check_availability_with_events(self):
-        ical = """BEGIN:VCALENDAR
-VERSION:2.0
-BEGIN:VEVENT
-DTSTART:20241202T100000Z
-DTEND:20241202T110000Z
-SUMMARY:Team Meeting
-END:VEVENT
-END:VCALENDAR"""
-        mock_response = make_httpx_response(text=ical)
-        with patch("app.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
+    async def test_owner_sees_calendar_and_summary(self, monkeypatch):
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        token = auth_context_var.set(fake_login("andrewbolster"))
+        try:
+            get = mock_calendar_session_get({"https://example.com/work.ics": self.BUSY_ICAL})
+            with patch("bolster.utils.calendars.session.get", side_effect=get):
+                async with Client(mcp_auth) as client:
+                    result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 7})
+                    assert "Team Meeting" in result.data
+                    assert "[work]" in result.data
+        finally:
+            auth_context_var.reset(token)
 
+    @pytest.mark.asyncio
+    async def test_no_busy_time_found(self, monkeypatch):
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
+        get = mock_calendar_session_get({"https://example.com/work.ics": self.EMPTY_ICAL})
+        with patch("bolster.utils.calendars.session.get", side_effect=get):
             async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
-                )
-                assert "Team Meeting" in result.data
-                assert "2024-12-02 10:00" in result.data
+                result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 7})
+                assert "free all day" in result.data
 
     @pytest.mark.asyncio
-    async def test_check_availability_default_parameters(self):
-        mock_response = make_httpx_response(
-            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
-        )
-        with patch("app.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
-
+    async def test_default_parameters(self, monkeypatch):
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
+        get = mock_calendar_session_get({"https://example.com/work.ics": self.EMPTY_ICAL})
+        with patch("bolster.utils.calendars.session.get", side_effect=get):
             async with Client(mcp) as client:
                 result = await client.call_tool("check_availability", {})
-                today = datetime.now().strftime("%Y-%m-%d")
-                assert today in result.data
+                assert "Availability" in result.data
 
     @pytest.mark.asyncio
-    async def test_check_availability_request_exception(self):
-        with patch("app.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(
-                side_effect=httpx.RequestError("Connection refused")
-            )
-            mock_client_cls.return_value = mock_client
-
+    async def test_http_error_from_one_calendar_does_not_crash_the_tool(self, monkeypatch):
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
+        with patch(
+            "bolster.utils.calendars.session.get", side_effect=requests.exceptions.ConnectionError("Connection refused")
+        ):
             async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 3}
-                )
-                assert "Error fetching calendar data" in result.data
+                result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 3})
+                # one calendar failing to fetch degrades to "no data from it", not a tool error
+                assert "free all day" in result.data
 
     @pytest.mark.asyncio
-    async def test_check_availability_network_error(self):
-        with patch("app.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(side_effect=Exception("Unexpected error"))
-            mock_client_cls.return_value = mock_client
-
-            async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 3}
-                )
-                assert "Error processing calendar information" in result.data
-
-    @pytest.mark.asyncio
-    async def test_check_availability_all_day_events(self):
-        ical = """BEGIN:VCALENDAR
-VERSION:2.0
-BEGIN:VEVENT
-DTSTART:20241202
-DTEND:20241203
-SUMMARY:Conference Day
-END:VEVENT
-END:VCALENDAR"""
-        mock_response = make_httpx_response(text=ical)
-        with patch("app.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
-
-            async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2024-12-01", "days_ahead": 7}
-                )
-                assert "Conference Day" in result.data
-
-    @pytest.mark.asyncio
-    async def test_check_availability_custom_date_range(self):
-        mock_response = make_httpx_response(
-            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
+    async def test_all_day_events(self, monkeypatch):
+        ical = (
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+            "BEGIN:VEVENT\r\nUID:1\r\nDTSTART;VALUE=DATE:20241202\r\nDTEND;VALUE=DATE:20241203\r\n"
+            "SUMMARY:Conference Day\r\nEND:VEVENT\r\n"
+            "END:VCALENDAR"
         )
-        with patch("app.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
-
-            async with Client(mcp) as client:
-                result = await client.call_tool(
-                    "check_availability", {"start_date": "2025-01-15", "days_ahead": 14}
-                )
-                assert "2025-01-15" in result.data
-                assert "2025-01-29" in result.data
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, self.CALENDARS_JSON)
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        token = auth_context_var.set(fake_login("andrewbolster"))
+        try:
+            get = mock_calendar_session_get({"https://example.com/work.ics": ical})
+            with patch("bolster.utils.calendars.session.get", side_effect=get):
+                async with Client(mcp_auth) as client:
+                    result = await client.call_tool("check_availability", {"start_date": "2024-12-01", "days_ahead": 7})
+                    assert "Conference Day" in result.data
+        finally:
+            auth_context_var.reset(token)
 
 
 class TestRSSFeedTool:
@@ -366,9 +349,7 @@ class TestRSSFeedTool:
 
     @pytest.mark.asyncio
     async def test_get_recent_blog_posts_no_channel(self):
-        mock_response = make_httpx_response(
-            content=b"""<?xml version="1.0"?><rss version="2.0"></rss>"""
-        )
+        mock_response = make_httpx_response(content=b"""<?xml version="1.0"?><rss version="2.0"></rss>""")
         with patch("app.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -419,6 +400,146 @@ class TestRSSFeedTool:
                 assert len(posts[0]["summary"]) == 500
 
 
+class TestPageContentTool:
+    """get_page_content fetches Hugo's markdown alternate for a page — andrewbolster.info only."""
+
+    MARKDOWN_BODY = b"""---
+title: "A Post"
+url: "http://andrewbolster.info/2024/01/a-post/"
+---
+
+Full post body here.
+"""
+
+    @pytest.mark.asyncio
+    async def test_fetches_markdown_alternate(self):
+        mock_response = make_httpx_response(text=self.MARKDOWN_BODY.decode())
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "get_page_content", {"url": "https://andrewbolster.info/2024/01/a-post/"}
+                )
+                assert "Full post body here." in result.data
+                mock_client.get.assert_awaited_once_with("https://andrewbolster.info/2024/01/a-post/index.md")
+
+    @pytest.mark.asyncio
+    async def test_fetches_static_page_not_just_blog_posts(self):
+        static_body = b"""---
+title: "About"
+url: "http://andrewbolster.info/about/"
+---
+
+About page content.
+"""
+        mock_response = make_httpx_response(text=static_body.decode())
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_page_content", {"url": "https://andrewbolster.info/about/"})
+                assert "About page content." in result.data
+                mock_client.get.assert_awaited_once_with("https://andrewbolster.info/about/index.md")
+
+    @pytest.mark.asyncio
+    async def test_adds_missing_trailing_slash(self):
+        mock_response = make_httpx_response(text=self.MARKDOWN_BODY.decode())
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                await client.call_tool("get_page_content", {"url": "https://andrewbolster.info/2024/01/a-post"})
+                mock_client.get.assert_awaited_once_with("https://andrewbolster.info/2024/01/a-post/index.md")
+
+    @pytest.mark.asyncio
+    async def test_rejects_other_domains(self):
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_page_content", {"url": "https://evil.example.com/x/"})
+                assert "Can't fetch that URL" in result.data
+                mock_client.get.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rejects_lookalike_subdomain(self):
+        """A hostname merely ending in the blog domain (not equal to it) must not pass."""
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_page_content", {"url": "https://notandrewbolster.info/x/"})
+                assert "Can't fetch that URL" in result.data
+                mock_client.get.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_not_found(self):
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(
+                side_effect=httpx.HTTPStatusError("404", request=MagicMock(), response=MagicMock(status_code=404))
+            )
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool("get_page_content", {"url": "https://andrewbolster.info/2099/01/nope/"})
+                assert "Couldn't find that page" in result.data
+
+    @pytest.mark.asyncio
+    async def test_network_error(self):
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(side_effect=httpx.RequestError("Network error"))
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "get_page_content", {"url": "https://andrewbolster.info/2024/01/a-post/"}
+                )
+                assert "Error fetching page content" in result.data
+
+    @pytest.mark.asyncio
+    async def test_truncates_oversized_content(self):
+        huge = "x" * (MAX_PAGE_CHARS + 1000)
+        mock_response = make_httpx_response(text=huge)
+        with patch("app.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            async with Client(mcp) as client:
+                result = await client.call_tool(
+                    "get_page_content", {"url": "https://andrewbolster.info/2024/01/a-post/"}
+                )
+                assert result.data.endswith("(truncated)")
+                assert len(result.data) <= MAX_PAGE_CHARS + len("\n\n... (truncated)")
+
+
 class TestIntegration:
     @pytest.mark.asyncio
     async def test_all_resources_accessible(self):
@@ -438,13 +559,15 @@ class TestIntegration:
                 assert result[0].text
 
     @pytest.mark.asyncio
-    async def test_all_tools_callable(self):
-        empty_ical = make_httpx_response(
-            text="BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR"
-        )
+    async def test_all_tools_callable(self, monkeypatch):
+        empty_ical = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR"
         empty_rss = make_httpx_response(
             content=b"""<?xml version="1.0"?>
 <rss version="2.0"><channel></channel></rss>"""
+        )
+        monkeypatch.setenv(
+            availability.CALENDARS_ENV_VAR,
+            _b64_calendars_json({"calendars": [{"name": "work", "url": "https://example.com/work.ics"}]}),
         )
 
         async with Client(mcp) as client:
@@ -454,15 +577,10 @@ class TestIntegration:
             )
             assert "Message received" in contact.data
 
-            with patch("app.httpx.AsyncClient") as mock_client_cls:
-                mock_client = AsyncMock()
-                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client.__aexit__ = AsyncMock(return_value=None)
-                mock_client.get = AsyncMock(return_value=empty_ical)
-                mock_client_cls.return_value = mock_client
-
+            get = mock_calendar_session_get({"https://example.com/work.ics": empty_ical})
+            with patch("bolster.utils.calendars.session.get", side_effect=get):
                 avail = await client.call_tool("check_availability", {})
-                assert "Calendar availability" in avail.data
+                assert "Availability" in avail.data
 
             with patch("app.httpx.AsyncClient") as mock_client_cls:
                 mock_client = AsyncMock()
@@ -471,10 +589,114 @@ class TestIntegration:
                 mock_client.get = AsyncMock(return_value=empty_rss)
                 mock_client_cls.return_value = mock_client
 
-                posts_result = await client.call_tool(
-                    "get_recent_blog_posts", {"limit": 3}
-                )
+                posts_result = await client.call_tool("get_recent_blog_posts", {"limit": 3})
                 assert isinstance(get_posts(posts_result), list)
+
+
+class TestAuthMount:
+    """mcp_auth must expose every tool the public mcp does, live via mount(),
+    plus its own auth-scoped tools (e.g. whoami), gated on
+    GITHUB_ALLOWED_LOGINS rather than on GitHub identity alone."""
+
+    @pytest.mark.asyncio
+    async def test_mounts_the_same_tools_as_the_public_server(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        token = auth_context_var.set(fake_login("andrewbolster"))
+        try:
+            async with Client(mcp) as public_client, Client(mcp_auth) as auth_client:
+                public_names = {t.name for t in await public_client.list_tools()}
+                auth_names = {t.name for t in await auth_client.list_tools()}
+            assert public_names <= auth_names, "mounted tools must all still be present"
+            assert "whoami" in auth_names
+            assert "whoami" not in public_names, "auth-scoped tools stay off the public server"
+            assert "send_contact_message" in auth_names
+        finally:
+            auth_context_var.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_unauthenticated_call_sees_no_tools(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        async with Client(mcp_auth) as client:
+            assert await client.list_tools() == []
+
+    @pytest.mark.asyncio
+    async def test_login_not_on_the_allowlist_is_rejected(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        token = auth_context_var.set(fake_login("someone-else"))
+        try:
+            async with Client(mcp_auth) as client:
+                assert await client.list_tools() == []
+                with pytest.raises(Exception, match="insufficient permissions"):
+                    await client.call_tool("send_contact_message", {"message": "hi", "sender": "x"})
+        finally:
+            auth_context_var.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_allowed_login_can_call_a_mounted_tool(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        token = auth_context_var.set(fake_login("andrewbolster"))
+        try:
+            async with Client(mcp_auth) as client:
+                result = await client.call_tool("send_contact_message", {"message": "hi", "sender": "x"})
+                assert "Message received" in result.data
+        finally:
+            auth_context_var.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_empty_allowlist_fails_closed(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_ALLOWED_LOGINS", raising=False)
+        token = auth_context_var.set(fake_login("andrewbolster"))
+        try:
+            async with Client(mcp_auth) as client:
+                assert await client.list_tools() == []
+        finally:
+            auth_context_var.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_whoami_reports_the_authenticated_login(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_ALLOWED_LOGINS", "andrewbolster")
+        token = auth_context_var.set(fake_login("andrewbolster"))
+        try:
+            async with Client(mcp_auth) as client:
+                result = await client.call_tool("whoami", {})
+                assert "andrewbolster" in result.data
+        finally:
+            auth_context_var.reset(token)
+
+
+class TestAvailabilityModule:
+    """Direct unit tests for availability.py's own logic — secret loading only.
+
+    The fetch/severity/merge/format logic lives in bolster.utils.calendars
+    now, and is tested there — see bolster's tests/test_utils_calendars.py.
+    """
+
+    def test_load_calendars_missing_env_var(self, monkeypatch):
+        monkeypatch.delenv(availability.CALENDARS_ENV_VAR, raising=False)
+        with pytest.raises(availability.AvailabilityNotConfiguredError):
+            availability.load_calendars()
+
+    def test_load_calendars_not_valid_base64(self, monkeypatch):
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, "{not valid base64!!")
+        with pytest.raises(availability.AvailabilityNotConfiguredError):
+            availability.load_calendars()
+
+    def test_load_calendars_valid_base64_but_invalid_json(self, monkeypatch):
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, base64.b64encode(b"not json").decode())
+        with pytest.raises(availability.AvailabilityNotConfiguredError):
+            availability.load_calendars()
+
+    def test_load_calendars_empty_list(self, monkeypatch):
+        monkeypatch.setenv(availability.CALENDARS_ENV_VAR, _b64_calendars_json({"calendars": []}))
+        with pytest.raises(availability.AvailabilityNotConfiguredError):
+            availability.load_calendars()
+
+    def test_load_calendars_valid(self, monkeypatch):
+        monkeypatch.setenv(
+            availability.CALENDARS_ENV_VAR,
+            _b64_calendars_json({"calendars": [{"name": "work", "url": "https://x/y.ics"}]}),
+        )
+        assert availability.load_calendars() == [{"name": "work", "url": "https://x/y.ics"}]
 
 
 if __name__ == "__main__":

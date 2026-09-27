@@ -51,9 +51,7 @@ def _sentinel_is_unset(value: Any) -> bool:
     return type(value).__name__ == "Sentinel"
 
 
-def _build_tool_fn(
-    root_group: click.Group, command_path: list[str], params: list[click.Parameter]
-):
+def _build_tool_fn(root_group: click.Group, command_path: list[str], params: list[click.Parameter]):
     """
     Build a callable that invokes a Click command via CliRunner and returns stdout.
     The callable's __annotations__ are set so FastMCP can generate a proper schema.
@@ -134,15 +132,9 @@ def _walk_and_register(
         doc_parts.append("\nParameters:")
         for p in visible_params:
             help_txt = getattr(p, "help", None) or ""
-            choices = (
-                f" Choices: {p.type.choices}"
-                if isinstance(p.type, click.Choice)
-                else ""
-            )
+            choices = f" Choices: {p.type.choices}" if isinstance(p.type, click.Choice) else ""
             default = p.default
-            default_str = (
-                "" if _sentinel_is_unset(default) else f" Default: {default!r}."
-            )
+            default_str = "" if _sentinel_is_unset(default) else f" Default: {default!r}."
             doc_parts.append(f"  {p.name}: {help_txt}{choices}{default_str}")
     docstring = "\n".join(doc_parts)
 
@@ -174,9 +166,7 @@ def _walk_and_register(
     wrapper = ns["_wrapper"]
     wrapper.__name__ = tool_name
     wrapper.__doc__ = docstring
-    wrapper.__annotations__ = {
-        k: v for k, v in tool_fn.__annotations__.items() if k != "return"
-    }
+    wrapper.__annotations__ = {k: v for k, v in tool_fn.__annotations__.items() if k != "return"}
     wrapper.__annotations__["return"] = str
     mcp.tool(name=tool_name)(wrapper)
 
