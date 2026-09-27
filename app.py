@@ -29,6 +29,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
 
 from availability import AvailabilityNotConfiguredError, get_availability
+from validation_middleware import ToolValidationErrorMiddleware
 
 # Initialize the MCP server
 mcp = FastMCP(
@@ -39,6 +40,7 @@ mcp = FastMCP(
         and key projects like Farset Labs. Use these resources to learn about Andrew's
         work in data science, AI research, autonomous systems, and technology community building.
     """,
+    middleware=[ToolValidationErrorMiddleware()],
 )
 
 
@@ -500,7 +502,7 @@ mcp_auth = FastMCP(
         client_secret=os.environ.get("GITHUB_CLIENT_SECRET", ""),
         base_url="https://mcp.bolster.online",
     ),
-    middleware=[AuthMiddleware(auth=require_allowed_login)],
+    middleware=[AuthMiddleware(auth=require_allowed_login), ToolValidationErrorMiddleware()],
 )
 mcp_auth.mount(mcp, namespace=None)
 
