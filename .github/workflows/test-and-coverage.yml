@@ -144,7 +144,7 @@ jobs:
     - name: 🛡️ Run Bandit security scan
       run: |
         uv add bandit[toml]
-        uv run bandit -r app.py -f json -o bandit-report.json || true
+        uv run bandit -r . -x ./.venv,./tests,./test_app.py,./htmlcov,./.claude -f json -o bandit-report.json || true
 
     - name: 🔍 Run Safety check for vulnerabilities
       run: |

@@ -16,6 +16,6 @@ typecheck:
 	uv run mypy app.py --ignore-missing-imports
 
 security:
-	uv run --with bandit bandit -r app.py -q || true
+	uv run --with bandit bandit -r . -x ./.venv,./tests,./test_app.py,./htmlcov,./.claude -q || true
 
 all: fmt test
