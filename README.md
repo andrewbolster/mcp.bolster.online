@@ -37,10 +37,12 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 - **Availability Tool** - Merged free/busy across multiple private calendars, with two response tiers: full detail (which calendar, event title) for Andrew, authenticated via `/auth/mcp`; free/busy-only for everyone else, including anonymous callers on the public `/mcp` endpoint
 - **Blog Posts Tool** - Fetch recent posts from RSS feed
 - **Page Content Tool** - Fetch the full text of one page (blog post or static page) as markdown (andrewbolster.info only)
+- **bolster data tools** - When the [`bolster`](https://github.com/andrewbolster/bolster) package is installed, every command in its CLI is exposed as a `bolster_<group>_<command>` tool (NI/UK open-data sources), generated from the Click command tree at startup
 
 ### Development Features
 
 - **FastMCP Framework** - Modern MCP server development
+- **Friendly Validation Errors** - Calls with unknown or missing tool arguments get an error naming the problem and the valid arguments, not a raw pydantic trace
 - **92% Test Coverage** - Comprehensive test suite with pytest
 - **Multi-Platform Support** - Ubuntu Latest & 22.04, Python 3.11-3.13
 - **Modern Code Quality** - Ruff formatting/linting, mypy type checking
@@ -65,8 +67,8 @@ uv sync
 ### Running Tests
 
 ```bash
-# Run tests with coverage
-uv run pytest test_app.py --cov=app --cov-report=term-missing -v
+# Run the whole suite (test_app.py + tests/) with coverage
+uv run pytest --cov=app --cov=click_mcp --cov-report=term-missing -v
 
 # Run all quality checks (same as CI)
 uv run ruff check .          # Linting
