@@ -701,3 +701,21 @@ class TestAvailabilityModule:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+class TestCorsExposedHeaders:
+    """Browser MCP clients need to read the session id and WWW-Authenticate."""
+
+    def test_session_and_auth_headers_are_exposed(self):
+        from starlette.testclient import TestClient
+
+        from app import app
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/.well-known/oauth-authorization-server",
+                headers={"Origin": "https://bolster.help"},
+            )
+
+        exposed = {h.strip().lower() for h in response.headers["access-control-expose-headers"].split(",")}
+        assert {"mcp-session-id", "www-authenticate"} <= exposed
