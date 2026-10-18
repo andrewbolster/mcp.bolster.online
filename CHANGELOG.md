@@ -1,5 +1,9 @@
 # Changelog
 
+## \[0.2.5\] - 2026-10-18
+
+- Expose mcp-session-id and WWW-Authenticate to browser clients (#49)
+
 ## \[0.2.4\] - 2026-09-27
 
 - fix: reformat tool-call validation errors for small tool-calling models (#39)
