@@ -29,6 +29,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
 
 from availability import AvailabilityNotConfiguredError, get_availability
+from facts import register_fact_tools
 from validation_middleware import ToolValidationErrorMiddleware
 
 # Initialize the MCP server
@@ -516,6 +517,9 @@ async def whoami() -> str:
     login = token.claims.get("login", "unknown")
     name = token.claims.get("name")
     return f"Signed in as {login}" + (f" ({name})" if name else "")
+
+
+register_fact_tools(mcp_auth)
 
 
 # Deployed via uvicorn (`uvicorn app:app`), not `fastmcp run`, since the
