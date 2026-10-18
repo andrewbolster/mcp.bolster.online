@@ -555,6 +555,10 @@ app = Starlette(
             allow_origins=["*"],
             allow_methods=["*"],
             allow_headers=["*"],
+            # Browser clients can only read response headers listed here:
+            # the session id to continue an MCP session, and WWW-Authenticate
+            # for the OAuth discovery hint on a 401.
+            expose_headers=["mcp-session-id", "www-authenticate"],
         )
     ],
     lifespan=_combined_lifespan,
