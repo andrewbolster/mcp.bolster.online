@@ -37,7 +37,7 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 - **Availability Tool** - Merged free/busy across multiple private calendars, with two response tiers: full detail (which calendar, event title) for Andrew, authenticated via `/auth/mcp`; free/busy-only for everyone else, including anonymous callers on the public `/mcp` endpoint
 - **Blog Posts Tool** - Fetch recent posts from RSS feed
 - **Page Content Tool** - Fetch the full text of one page (blog post or static page) as markdown (andrewbolster.info only)
-- **Facts tools** - `add_fact`, `get_fact`, `search_facts`, `update_fact`, `delete_fact`: a small per-user knowledge graph of (time, subject, object, action) facts with optional confidence and references, available only to authenticated callers on `/auth/mcp` (see [Facts](#facts))
+- **Facts tools** - `add_fact`, `get_fact`, `search_facts`, `describe_entity`, `update_fact`, `delete_fact`: a small knowledge graph of (time, subject, object, action) facts with optional confidence and references, private by default or shared as public, available only to authenticated callers on `/auth/mcp` (see [Facts](#facts))
 - **bolster data tools** - When the [`bolster`](https://github.com/andrewbolster/bolster) package is installed, every command in its CLI is exposed as a `bolster_<group>_<command>` tool (NI/UK open-data sources), generated from the Click command tree at startup
 
 ### Development Features
@@ -108,7 +108,9 @@ This also follows from how the service is sandboxed (`ProtectHome=true`, `Protec
 
 ### Facts
 
-The facts tools keep each login's facts in a SQLite file, `data/facts.sqlite3` next to `app.py` (git-ignored, created on first use, writable under the service's `ReadWritePaths`; `git reset --hard` on deploy leaves it alone). Set `MCP_DATA_DIR` to keep it elsewhere. A fact is a quad: `time` (strict ISO 8601: `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, a datetime with `Z` or an offset, or `--MM-DD` for a yearly date), `subject`, `object` and `action`, plus an optional `confidence` (0 to 1) and `references`. Each gets a UUIDv7 `id`, a `created` timestamp and `created_by`. Example: Szilvia's birthday is `--10-18`, `Szilvia Mandic`, `Birthday`, `Has`. The owner is always the verified login, never a tool argument.
+The facts tools keep each login's facts in a SQLite file, `data/facts.sqlite3` next to `app.py` (git-ignored, created on first use, writable under the service's `ReadWritePaths`; `git reset --hard` on deploy leaves it alone). Set `MCP_DATA_DIR` to keep it elsewhere. A fact is a quad: `subject`, `object` and `action`, plus an optional `time` (strict ISO 8601: `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, a datetime with `Z` or an offset, or `--MM-DD` for a yearly date; omit it for a timeless fact), `confidence` (0 to 1) and `references`. Each gets a UUIDv7 `id`, a `created` timestamp and `created_by`. Example: Szilvia's birthday is `--10-18`, `Szilvia Mandic`, `Birthday`, `Has`. The owner is always the verified login, never a tool argument.
+
+Facts are private unless `public` is true, and a public fact can be read by every authenticated user; only its creator can change, delete or un-publish it. `search_facts` takes `scope`: `mine` (default), `public` or `all` (yours plus others' public). Types are ordinary facts with the action `Is a` (case- and whitespace-insensitive), e.g. `Szilvia Mandic` / `Person` / `Is a`. `describe_entity` lists an entity's types (following the Is-a chain, up to 10 steps), `search_facts` can filter by `subject_type` and `object_type`, and `add_fact` replies with an `untyped` list of names that have no Is-a fact yet.
 
 **This is the only copy of that data, so back it up**, for example nightly from cron (note the escaped `%`):
 

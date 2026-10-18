@@ -14,6 +14,7 @@ import facts
 from app import mcp, mcp_auth
 
 BIRTHDAY = {"time": "--10-18", "subject": "Szilvia Mandic", "object": "Birthday", "action": "Has"}
+FACT_TOOLS = {"add_fact", "get_fact", "search_facts", "describe_entity", "update_fact", "delete_fact"}
 
 
 @pytest.fixture(autouse=True)
@@ -114,7 +115,9 @@ class TestAddAndGet:
         async with signed_in("alice") as client:
             fact = await add(client, confidence=0.9, references=["https://example.com/card"])
             fetched = (await client.call_tool("get_fact", {"id": fact["id"]})).structured_content
-        assert fetched == fact
+        assert fetched == {k: v for k, v in fact.items() if k != "untyped"}
+        assert fact["untyped"] == ["Szilvia Mandic", "Birthday"]
+        assert fact["public"] is False
         assert fact["time"] == "--10-18"
         assert (fact["subject"], fact["object"], fact["action"]) == ("Szilvia Mandic", "Birthday", "Has")
         assert fact["confidence"] == 0.9
@@ -308,7 +311,7 @@ class TestWhoSeesWhat:
                 await bob.call_tool("delete_fact", {"id": mine["id"]})
         async with signed_in("alice") as alice:
             intact = (await alice.call_tool("get_fact", {"id": mine["id"]})).structured_content
-        assert intact == mine
+        assert intact == {k: v for k, v in mine.items() if k != "untyped"}
 
     async def test_each_login_has_its_own_facts_and_authorship(self):
         async with signed_in("alice") as alice:
@@ -321,10 +324,8 @@ class TestWhoSeesWhat:
 
     async def test_owner_is_never_a_tool_argument(self):
         async with signed_in("alice") as client:
-            tools = {
-                t.name: t for t in await client.list_tools() if t.name.endswith("_fact") or t.name == "search_facts"
-            }
-        assert set(tools) == {"add_fact", "get_fact", "search_facts", "update_fact", "delete_fact"}
+            tools = {t.name: t for t in await client.list_tools() if t.name in FACT_TOOLS}
+        assert set(tools) == FACT_TOOLS
         for tool in tools.values():
             assert not {"owner", "login", "user", "created_by"} & set(tool.inputSchema["properties"])
 
@@ -348,7 +349,7 @@ class TestWhoSeesWhat:
     async def test_the_public_server_does_not_have_the_tools(self):
         async with Client(mcp) as public:
             names = {t.name for t in await public.list_tools()}
-        assert not names & {"add_fact", "get_fact", "search_facts", "update_fact", "delete_fact"}
+        assert not names & FACT_TOOLS
 
 
 class TestStorage:
