@@ -208,3 +208,6 @@ __marimo__/
 
 # Claude Code local state (worktrees etc.)
 .claude/
+
+# Per-user facts database (see facts.py)
+data/
