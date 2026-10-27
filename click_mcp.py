@@ -81,6 +81,8 @@ def _build_tool_fn(root_group: click.Group, command_path: list[str], params: lis
         for p in params:
             if _is_internal(p):
                 continue
+            if p.name is None:
+                continue
             val = kwargs.get(p.name)
             if val is None:
                 continue
