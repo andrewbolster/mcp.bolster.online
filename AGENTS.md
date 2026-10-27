@@ -34,7 +34,7 @@ For the current resource and tool list, read `app.py`: `@mcp.resource(...)` and 
 uv sync
 uv run pytest -q                 # all tests (test_app.py + tests/); pytest-asyncio in auto mode
 uv run pytest tests/test_click_mcp.py -q
-uv run pre-commit run --all-files   # ruff, mypy, bandit
+uv run pre-commit run --all-files   # ruff, ty, bandit
 make test                        # lint + typecheck + security + pytest with coverage
 uv run python app.py             # run the server
 ```
