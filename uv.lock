@@ -166,7 +166,7 @@ wheels = [
 
 [[package]]
 name = "bolster"
-version = "0.11.9"
+version = "0.11.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -195,9 +195,9 @@ dependencies = [
     { name = "urllib3" },
     { name = "xlrd" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/28/2c/039046d8bd5b250f5647cca169df517a1c21f52dd53b5a2df377c91bd4ec/bolster-0.11.9.tar.gz", hash = "sha256:c32a9c8d7cbb73f22f457fb6fa7e22f457993057a8d2570794c125dff9558ff0", size = 568688, upload-time = "2026-10-22T14:54:27.57Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/f9/d206c9fdd956fc8dbe7e637fe279c0ae63d8de181d9ecc46460f4286b36d/bolster-0.11.11.tar.gz", hash = "sha256:3143104147fbaa38c9327115b696e1b6718dc6e5d2f5faf7931a940054de7424", size = 570366, upload-time = "2026-11-11T16:05:55.384Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/71/88/35701c7ce6c6a1af17bfb746b4aabe938d72062a10f4a8db23a9123a7be5/bolster-0.11.9-py3-none-any.whl", hash = "sha256:678c02f55666af32e1f11a78e8ccae116138942fd391969471af33fad23ec8f5", size = 692690, upload-time = "2026-10-22T14:54:25.865Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/51/3347becf0859c37c7b584b88c8c8ee0655bfc512d483a80bfc4f51db2f53/bolster-0.11.11-py3-none-any.whl", hash = "sha256:57df905c561f0ac8e71e1f35fdfb533884612effe0bada9e6af7adbbbb7cca70", size = 694583, upload-time = "2026-11-11T16:05:53.695Z" },
 ]
 
 [[package]]
