@@ -113,6 +113,7 @@ deploying updates the live system. Two exceptions matter:
 | `/etc/systemd/system/mcp-bolster.service` | symlink → `deployment/systemd/mcp-bolster.service` |
 | `/etc/systemd/system/mcp-webhook.service` | **copy**, not a symlink — currently byte-identical, but repo edits will not propagate |
 | `/etc/systemd/system/mcp-bolster.service.d/auth.conf` | host-only drop-in holding the GitHub OAuth client ID/secret and `GITHUB_ALLOWED_LOGINS`. Deliberately absent from the repo. |
+| `/etc/sudoers.d/www-data-mcp` | host-only. The only privileges `deploy.sh` (running as `www-data`) has: `systemctl stop`/`start`/`is-active mcp-bolster`, `systemctl reload`/`restart mcp-webhook`, `systemctl reload nginx`, and `/usr/sbin/nginx -t` (that exact argument, so the config is validated before every reload). A new `sudo` call in `deploy.sh` needs a matching line here, or it fails at deploy time with "a password is required". |
 
 ### Verifying the deployment is current
 
