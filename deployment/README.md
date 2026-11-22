@@ -20,14 +20,17 @@ deployment/
 
 ### `deploy.sh`
 - **Purpose**: Automated deployment script triggered by GitHub webhooks
-- **Features**:
-  - Safe deployment with rollback on failure
-  - Full test suite execution before deployment
-  - Security scanning (Bandit, Safety)
-  - Configuration validation
-  - Comprehensive logging
+- **Flow**:
+  1. **Lock**: takes `flock` on `.cache/deploy.lock` and *waits* (up to 10 minutes) behind any deploy already running, so a merge and its version-bump PR a minute apart deploy one after the other.
+  2. **Target**: fetches `origin/main` and deploys that commit's current head. If the live checkout is already at it and the service is active it logs "Already deployed" and exits 0 without restarting anything.
+  3. **Stage**: checks the target out into a throwaway `git worktree` under `.cache/stage/`, runs `uv sync`, the full `uv run pytest -q`, Bandit and Safety (`uv run --with`, so `pyproject.toml`/`uv.lock` are never modified) and an `import app` configuration check (120 s hard limit). The running service is **not touched** during any of this; a failure logs `STAGING FAILED at step: ...` and exits non-zero with production still serving the previous commit. Bandit and Safety are warnings only; a one-line `Safety summary: N vulnerabilities reported` is logged.
+  4. **Swap** (the only downtime): records `PREV`, stops `mcp-bolster`, `git reset --hard <sha>`, re-injects the webhook secret (restarting `mcp-webhook`), `nginx -t` then reload, `uv sync`, starts the service, then health-checks it (service active and an HTTP response from `127.0.0.1:9001`; connection refused/502 is retried for about a minute).
+  5. **Rollback**: if anything after the stop fails, resets to `PREV`, re-syncs, restarts, logs `ROLLING BACK` and exits non-zero.
+- **Tests**: `deployment/tests/test_deploy.sh` runs the script against a temporary git remote with `sudo`, `systemctl`, `nginx`, `curl` and `uv` shimmed; it touches nothing on the host. Run it, and `shellcheck deployment/deploy.sh`, after editing the script.
+- **Not covered by the harness**: the real `uv`/`systemd`/nginx behaviour and `ProtectSystem=strict` (the script writes only under `/opt/mcp.bolster.online` and `/var/log`).
 - **Location**: Executed from `/opt/mcp.bolster.online/deployment/deploy.sh`
 - **Permissions**: Must be executable (`chmod +x`)
+- **Self-replacement**: `git reset --hard` replaces `deploy.sh` with a new file (new inode) while the old copy is still running; the running shell keeps reading the old file, so the deploy that installs a new `deploy.sh` still finishes with the old logic. A change to the script therefore takes effect from the *next* deploy.
 
 ### `webhook.json`
 - **Purpose**: Configuration for the webhook listener service
@@ -93,9 +96,9 @@ git -c safe.directory=/opt/mcp.bolster.online -C /opt/mcp.bolster.online status
 
 | Path | State | Why |
 | --- | --- | --- |
-| `deployment/webhook.json` | always modified | `deploy.sh` runs `git reset --hard origin/main`, which restores the `$WEBHOOK_SECRET` placeholder, then `sed`-injects the real secret back. The file is dirty from the moment a deploy finishes. **Never commit this diff.** |
-| `pyproject.toml`, `uv.lock` | modified | `bandit` and `safety` were added to dev deps on the host so `deploy.sh`'s security scan step could run. Not committed upstream, so every `git reset --hard` drops them. Fixing this means committing both to `[dependency-groups] dev`. |
-| `.venv/`, `.cache/`, `__pycache__/`, `.pytest_cache/`, `.coverage`, `.safety/` | untracked | `deploy.sh` builds the venv and runs the full test suite in place. Expected. |
+| `deployment/webhook.json` | always modified | `deploy.sh` runs `git reset --hard <sha>`, which restores the `$WEBHOOK_SECRET` placeholder, then `sed`-injects the real secret back. The file is dirty from the moment a deploy finishes. **Never commit this diff.** |
+| `pyproject.toml`, `uv.lock` | clean (older deploys left them modified) | `deploy.sh` now runs Bandit and Safety with `uv run --with`, so it no longer edits them. If they still show as modified on the host, that is a leftover from the old script and the next `git reset --hard` clears it. |
+| `.venv/`, `.cache/`, `__pycache__/`, `.pytest_cache/`, `.coverage`, `.safety/` | untracked | `deploy.sh` builds the live venv; tests run in a staging worktree under `.cache/stage/` (removed after each run), with the deploy lock at `.cache/deploy.lock`. Expected. |
 | `.local/` | untracked | `HOME=/opt/mcp.bolster.online` in the service unit, so tooling scribbles here. Harmless. |
 | `deployment/deploy.sh.bak` | untracked | Stale hand-edit backup predating the current `deploy.sh`. Safe to delete. |
 
@@ -132,7 +135,7 @@ divergent. Always `git fetch origin` before comparing.
 - **Secure Headers**: X-Frame-Options, X-Content-Type-Options, etc.
 - **File Protection**: Block access to sensitive files (`.env`, `.log`, etc.)
 - **Secret Management**: Environment variable references (no hardcoded secrets)
-- **Pre-commit Security**: GitGuardian secret scanning, Bandit vulnerability checks
+- **Pre-commit Security**: GitGuardian secret scanning, Bandit vulnerability checks (run in development and CI; `deploy.sh` runs Bandit and Safety itself in staging)
 - **Git History Protection**: Secrets removed from all git history using filter-branch
 
 ## Maintenance
