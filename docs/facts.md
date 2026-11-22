@@ -1,0 +1,65 @@
+# Facts
+
+A small, generic store of facts, slightly more structured than a wiki. A fact is `(subject, action, object)` plus an optional validity interval, a signed confidence, provenance and free attributes. Aliases, types, "me" and reviews are all ordinary facts or small tables beside them. This is a fact store, not a reality store: several actors can hold conflicting facts, and confidence says how much each is believed.
+
+## Layers
+
+```
+facts_tools.py   MCP adapter: tool wrappers, actor from the verified GitHub login, database location
+factstore/       the engine: standard library only, explicit `actor` on every call, no auth, no MCP
+SQLite           data/facts.sqlite3 (override with MCP_DATA_DIR); WAL; JSONL export/import for backup and migration
+```
+
+`tests/test_factstore_architecture.py` fails if any `factstore` module imports MCP, a web framework or this app, so the engine can be moved to its own repository with `git mv`. Conventions are `factstore.Config` defaults, not hard-coded vocabulary: alias action `Alias of`, type action `Is a`, kinds `person place org date number text actor`.
+
+## A fact
+
+| Field | Meaning |
+| --- | --- |
+| `id` | UUIDv7 |
+| `subject`, `action`, `object` | free text up to 200 characters; names may carry a kind prefix (`person:Ada Example`, `date:1988-05-17`) |
+| `confidence` | -1.0 to 1.0, default 1.0. 0 is "no statement"; negative is a falsification. Queries return positive facts unless `include_negative` |
+| `valid_from`, `valid_to` | optional ISO 8601 (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`, or a datetime; UTC when no offset). A coarse `valid_to` includes its whole period |
+| `public` | readable by every authenticated user (default private) |
+| `attributes` | optional JSON object, up to 4 KB, searchable by key and value |
+| `references` | optional list of sources |
+| `created_by/at`, `updated_by/at` | provenance, server-set |
+| `reviewed_by/at` | the latest confirmation |
+
+Values such as dates are objects with a kind: "my birthday is 17 May 1988" is (`me`, `Has birthday`, `date:1988-05-17`); `--05-17` is a date with no known year. Only the `date` kind is validated. A prefix is parsed only when it is a recognised kind, so `Meeting: standup` stays literal.
+
+## Names, aliases and "me"
+
+- An alias is the fact (`bolster`, `Alias of`, `person:Ada Example`). Names are canonicalised when written, and a queried name matches every alias of its entity, so facts written before the alias existed are still found. Chains are followed ten hops; cycles and self-aliases are refused.
+- A name that resolves to more than one entity is an error listing the candidates. Nothing is guessed.
+- `me` and `self` mean the calling actor's entity, bound with `set_self` as the alias fact (`actor:<login>`, `Alias of`, entity). Only the actor can write their own `actor:` name.
+- Matching is by folded name and kind. A name without a kind matches any kind, and a stored name without a kind matches any queried kind.
+- Values (`date:`, `number:`, `text:`) are never alias-resolved.
+
+## Visibility and reviews
+
+One rule decides what an actor can read, for every tool: scope `mine` (created by the actor), `public`, or `all` (both, plus the single facts the actor has been asked to review). Only the creator changes or deletes a fact; someone else's private fact looks exactly like a missing id.
+
+An owner can ask another actor to review a fact. While the request is open, that actor can read that one fact. `mark_reviewed` records `confirmed` (stamps `reviewed_by/at`), `disputed` or `unsure`, and closes the actor's open requests on the fact. A dispute by someone other than the owner creates the reviewer's own private fact with confidence -1 that references the disputed one; the owner's fact is untouched. `due_for_review` lists the actor's facts last reviewed (or, never reviewed, created) before a cutoff, 90 days ago by default; `pending_reviews` lists open requests.
+
+## Portability
+
+`python -m factstore export --db data/facts.sqlite3 --all > backup.jsonl` and `... import` write and read JSON Lines: a header with the schema version, then facts, reviews and review requests. Import keeps ids and `created_at`, skips ids it already has, and is all-or-nothing. The engine refuses to open a database whose schema version differs from its own, so rolling the code back cannot damage data; export with the old code and import with the new.
+
+## Assumptions to confirm
+
+1. `valid_from`/`valid_to` replace `time` from PR 51. `created_at` is the assertion time and is only overridable through import.
+1. `valid_to` includes its period (so `valid_to='2015'` means through the end of 2015); `valid_to` before `valid_from` is refused.
+1. Only the date kind is validated; numbers and text are stored as given.
+1. Alias facts are hidden from `search_facts` unless the action is `Alias of`; `describe_entity` lists them.
+1. Only the fact's owner can request a review; a request grants read access to that one fact; anyone who can see a fact (including a public one) can review it.
+1. A dispute by the owner only logs it, and `unsure` only logs.
+1. `describe_entity` counts exclude alias facts and facts with confidence 0 or below.
+1. `relationships_between` matches intermediaries by folded name, ignores alias and non-positive facts, and caps depth at 2 and paths at 100.
+1. Import does not canonicalise names, so a backup restores exactly what was stored.
+1. `factstore` is a placeholder package name.
+
+## Next
+
+- **Milestone 2:** date helpers (`upcoming`, `age_at`), a per-action single-valued flag so other values are implicitly false, advisory hints for actions not used before.
+- **Milestone 3:** elicit the user to review stale facts, generated Markdown page per entity, scheduled backup to the NAS, extraction into its own repository.

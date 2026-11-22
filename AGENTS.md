@@ -9,13 +9,18 @@ app.py                  # Everything user-facing: resources, tools, both servers
 click_mcp.py            # Turns a Click command tree into MCP tools (used for the bolster CLI)
 validation_middleware.py# Friendly errors for bad tool arguments
 availability.py         # Multi-calendar ICS free/busy merge behind check_availability
+facts_tools.py          # MCP adapter for the fact store (registered on the authenticated server only)
+factstore/              # Generic fact-store engine: stdlib only, no MCP imports (see docs/facts.md)
 main.py                 # Stub — not a server entry point; run `python app.py`
 test_app.py             # Resources, tools and server wiring (in-memory FastMCP Client)
 tests/
 ├── test_click_mcp.py           # click_mcp against a fake CLI
 ├── test_bolster_integration.py # the real bolster CLI exposed as tools
+├── test_factstore_*.py         # the fact-store engine, with no MCP involved
+├── test_facts_tools.py         # the fact tools through the in-memory MCP client
 └── fixtures/fake_cli/          # small Click app used by the click_mcp tests
 deployment/             # nginx / systemd / webhook config (see README)
+docs/facts.md           # Design note for the fact store
 ```
 
 For the current resource and tool list, read `app.py`: `@mcp.resource(...)` and `@mcp.tool()` are the source of truth. Don't maintain a second list here.
@@ -26,6 +31,7 @@ For the current resource and tool list, read `app.py`: `@mcp.resource(...)` and 
 - **Mounting runs the mounted server's middleware chain.** A tool called through `mcp_auth` passes through both servers' middleware. `check_availability` decides its response tier from `get_access_token()`: a non-None token means `AuthMiddleware` already confirmed the login is allowlisted, so it returns full detail; anonymous callers on `/mcp` get free/busy only.
 - **bolster tools are generated.** `register_click_commands(mcp, _bolster_cli, prefix="bolster", exclude={"list-sources"})` walks the Click tree and registers one tool per command (`bolster_<group>_<command>`), building wrappers with `exec()`. The registration sits in a `try/except ImportError`, so if `bolster` isn't installed the `bolster_*` tools silently disappear rather than failing startup — check `tests/test_bolster_integration.py` if a tool is missing.
 - **Argument errors are rewritten.** `ToolValidationErrorMiddleware` catches pydantic `ValidationError` on tool calls and re-raises `ValueError` naming the bad argument and listing the valid ones, because small tool-calling models can't act on a raw pydantic trace. It is installed on both `mcp` and `mcp_auth`. `Client.call_tool` surfaces it as `ToolError`.
+- **Facts are an engine plus an adapter.** `factstore/` holds all behaviour and takes the acting `actor` explicitly; `facts_tools.py` only supplies the verified login, the database path (`MCP_DATA_DIR`, default `data/facts.sqlite3`, git-ignored) and error mapping, and registers on `mcp_auth` only. Every read goes through one visibility rule; keep it that way. The engine refuses a database with a different schema version: migrate with `python -m factstore export` and `import`.
 - **Dependency updates are automated.** `upgrade-bolster.yml` runs on the `bolster-release` repository dispatch and opens a lockfile-bump PR whenever `bolster` publishes.
 
 ## Commands

@@ -208,3 +208,7 @@ __marimo__/
 
 # Claude Code local state (worktrees etc.)
 .claude/
+data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

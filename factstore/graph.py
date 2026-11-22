@@ -1,0 +1,86 @@
+"""relationships_between: the facts connecting two entities, directly or through one intermediary."""
+
+import json
+import sqlite3
+from typing import Any
+
+from .config import Config
+from .entities import entity
+from .errors import ValidationError
+from .rows import fact_dict, match_refs, visible
+from .values import fold
+
+MAX_DEPTH = 2
+MAX_PATHS = 100
+_SEP = "\x1f"
+
+
+def relationships_between(
+    conn: sqlite3.Connection, cfg: Config, actor: str, a: str, b: str, *, scope: str = "mine", max_depth: int = 1
+) -> dict[str, Any]:
+    """Facts linking entity ``a`` and entity ``b`` in either direction, aliases resolved on both sides.
+
+    ``max_depth`` 1 returns direct facts. ``max_depth`` 2 also returns paths through exactly one intermediary
+    entity (a to x to b, each hop in either direction). Only positive-confidence facts count, alias facts are
+    structure rather than relationships, and the walk never revisits a node.
+    """
+    if not isinstance(max_depth, int) or isinstance(max_depth, bool) or not 1 <= max_depth <= MAX_DEPTH:
+        raise ValidationError(f"max_depth must be 1 to {MAX_DEPTH}.")
+    first = entity(conn, cfg, actor, scope, a, "a")
+    second = entity(conn, cfg, actor, scope, b, "b")
+    if first.canonical.key == second.canonical.key:
+        raise ValidationError(f"a and b are the same entity ({first.canonical}).")
+
+    vis, vparams = visible(scope, actor)
+    structural = fold(cfg.alias_action)
+    a_subject, a_sp = match_refs("subject", first.names)
+    a_object, a_op = match_refs("object", first.names)
+    b_subject, b_sp = match_refs("subject", second.names)
+    b_object, b_op = match_refs("object", second.names)
+    rows = conn.execute(
+        f"SELECT *, CASE WHEN {a_subject} THEN 'a_to_b' ELSE 'b_to_a' END AS direction FROM facts "  # nosec B608
+        f"WHERE {vis} AND confidence > 0 AND action_f != ? "
+        f"AND (({a_subject} AND {b_object}) OR ({b_subject} AND {a_object})) ORDER BY created_at, rowid",
+        [*a_sp, *vparams, structural, *a_sp, *b_op, *b_sp, *a_op],
+    ).fetchall()
+    direct = [{**fact_dict(row), "direction": row["direction"]} for row in rows]
+
+    indirect: list[dict[str, Any]] = []
+    if max_depth >= 2:
+        indirect = _one_hop_paths(
+            conn, vis, vparams, structural, {n.f for n in first.names}, {n.f for n in second.names}
+        )
+    return {"a": str(first.canonical), "b": str(second.canonical), "direct": direct, "indirect": indirect}
+
+
+def _one_hop_paths(
+    conn: sqlite3.Connection, vis: str, vparams: list[Any], structural: str, starts: set[str], goals: set[str]
+) -> list[dict[str, Any]]:
+    """Paths start - via - goal from a depth-capped recursive walk over facts that never revisits a node."""
+    edges = (
+        f"SELECT id AS fid, subject_f AS src, object_f AS dst FROM facts WHERE {vis} AND confidence > 0 "  # nosec B608
+        f"AND action_f != ? UNION ALL "
+        f"SELECT id, object_f, subject_f FROM facts WHERE {vis} AND confidence > 0 AND action_f != ?"
+    )
+    goal_marks = ",".join("?" * len(goals))
+    sql = f"""
+        WITH RECURSIVE edge(fid, src, dst) AS ({edges}),
+        walk(depth, node, facts, nodes) AS (
+            SELECT 0, value, '', char(31) || value || char(31) FROM (SELECT DISTINCT value FROM json_each(?))
+            UNION ALL
+            SELECT w.depth + 1, e.dst, w.facts || e.fid || ',', w.nodes || e.dst || char(31)
+            FROM walk w JOIN edge e ON e.src = w.node
+            WHERE w.depth < {MAX_DEPTH} AND instr(w.nodes, char(31) || e.dst || char(31)) = 0
+        )
+        SELECT facts, nodes FROM walk WHERE depth = {MAX_DEPTH} AND node IN ({goal_marks}) LIMIT ?
+    """  # nosec B608 - fixed fragments, bound values
+    params = [*vparams, structural, *vparams, structural, json.dumps(sorted(starts)), *sorted(goals), MAX_PATHS]
+    paths: list[dict[str, Any]] = []
+    for row in conn.execute(sql, params).fetchall():
+        via = row["nodes"].strip(_SEP).split(_SEP)[1]
+        if via in starts or via in goals:  # another name for one of the endpoints, not an intermediary
+            continue
+        fact_ids = [part for part in row["facts"].split(",") if part]
+        facts = [fact_dict(conn.execute("SELECT * FROM facts WHERE id = ?", (fid,)).fetchone()) for fid in fact_ids]
+        paths.append({"via": via, "facts": facts})
+    return paths

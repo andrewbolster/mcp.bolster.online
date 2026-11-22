@@ -37,6 +37,7 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 - **Availability Tool** - Merged free/busy across multiple private calendars, with two response tiers: full detail (which calendar, event title) for Andrew, authenticated via `/auth/mcp`; free/busy-only for everyone else, including anonymous callers on the public `/mcp` endpoint
 - **Blog Posts Tool** - Fetch recent posts from RSS feed
 - **Page Content Tool** - Fetch the full text of one page (blog post or static page) as markdown (andrewbolster.info only)
+- **Facts tools** - A per-user store of facts with aliases, validity intervals and reviews, on the authenticated server only (`/auth/mcp`); see [docs/facts.md](docs/facts.md)
 - **bolster data tools** - When the [`bolster`](https://github.com/andrewbolster/bolster) package is installed, every command in its CLI is exposed as a `bolster_<group>_<command>` tool (NI/UK open-data sources), generated from the Click command tree at startup
 
 ### Development Features
