@@ -1,5 +1,9 @@
 # Changelog
 
+## \[0.3.0\] - 2026-11-22
+
+- feat: generic facts store (factstore engine + MCP adapter), prototype milestone 1 (#80)
+
 ## \[0.2.7\] - 2026-11-22
 
 - fix(deploy): stage and test before stopping the service, serialise deploys, roll back on failure (#76)
