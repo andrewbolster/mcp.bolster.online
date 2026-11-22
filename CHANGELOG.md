@@ -1,5 +1,9 @@
 # Changelog
 
+## \[0.2.6\] - 2026-11-22
+
+- fix: restore friendly tool-argument errors with fastmcp 3.4.x (#73)
+
 ## \[0.2.5\] - 2026-10-18
 
 - Expose mcp-session-id and WWW-Authenticate to browser clients (#49)
