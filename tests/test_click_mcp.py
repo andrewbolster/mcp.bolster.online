@@ -4,10 +4,12 @@ import click
 import pytest
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ValidationError as FastMCPValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from click_mcp import register_click_commands
 from tests.fixtures.fake_cli.cli import cli as fake_cli
-from validation_middleware import ToolValidationErrorMiddleware
+from validation_middleware import ToolValidationErrorMiddleware, _pydantic_error
 
 
 @pytest.fixture
@@ -233,3 +235,83 @@ class TestToolValidationErrorMiddleware:
         message = str(exc_info.value)
         assert "fake_greet" in message
         assert "name" in message
+
+    @pytest.mark.asyncio
+    async def test_wrong_type_for_known_argument_gives_a_friendly_message(self, mcp_with_validation_middleware):
+        async with Client(mcp_with_validation_middleware) as client:
+            with pytest.raises(ToolError) as exc_info:
+                await client.call_tool("fake_greet", {"name": "Ada", "count": "many"})
+
+        message = str(exc_info.value)
+        assert "fake_greet" in message
+        assert "count" in message
+        for valid in ("name", "count", "shout"):
+            assert valid in message
+        # Never the raw pydantic trace, whatever the kind of validation failure.
+        assert "validation error for call" not in message
+        assert "errors.pydantic.dev" not in message
+
+    @pytest.mark.asyncio
+    async def test_non_validation_errors_pass_through_unchanged(self):
+        server = FastMCP(name="test", middleware=[ToolValidationErrorMiddleware()])
+
+        @server.tool
+        def explode() -> str:
+            raise RuntimeError("boom from the tool body")
+
+        async with Client(server) as client:
+            with pytest.raises(ToolError) as exc_info:
+                await client.call_tool("explode", {})
+
+        message = str(exc_info.value)
+        assert "boom from the tool body" in message
+        assert "Unknown argument" not in message
+        assert "Invalid arguments" not in message
+
+    @pytest.mark.asyncio
+    async def test_fastmcp_validation_error_without_a_pydantic_cause_is_not_rewritten(self):
+        server = FastMCP(name="test", middleware=[ToolValidationErrorMiddleware()])
+
+        @server.tool
+        def reject() -> str:
+            raise FastMCPValidationError("custom rejection from the tool body")
+
+        async with Client(server) as client:
+            with pytest.raises(ToolError) as exc_info:
+                await client.call_tool("reject", {})
+
+        message = str(exc_info.value)
+        assert "custom rejection from the tool body" in message
+        assert "Unknown argument" not in message
+        assert "Invalid arguments" not in message
+
+
+class TestPydanticErrorUnwrapping:
+    """``_pydantic_error`` finds the pydantic error behind whichever exception FastMCP raises."""
+
+    @staticmethod
+    def _pydantic_error() -> ValidationError:
+        try:
+            TypeAdapter(int).validate_python("not a number")
+        except ValidationError as exc:
+            return exc
+        raise AssertionError("expected a pydantic ValidationError")
+
+    def test_direct_pydantic_error_is_returned(self):
+        err = self._pydantic_error()
+        assert _pydantic_error(err) is err
+
+    def test_fastmcp_wrapper_is_unwrapped_to_its_cause(self):
+        err = self._pydantic_error()
+        wrapper = FastMCPValidationError("wrapped")
+        wrapper.__cause__ = err
+        assert _pydantic_error(wrapper) is err
+
+    def test_fastmcp_wrapper_without_a_pydantic_cause_is_none(self):
+        assert _pydantic_error(FastMCPValidationError("no cause")) is None
+        wrapper = FastMCPValidationError("other cause")
+        wrapper.__cause__ = ValueError("not pydantic")
+        assert _pydantic_error(wrapper) is None
+
+    def test_unrelated_exceptions_are_none(self):
+        assert _pydantic_error(RuntimeError("boom")) is None

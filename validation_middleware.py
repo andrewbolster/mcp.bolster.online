@@ -5,9 +5,11 @@ messages a small tool-calling model can actually act on.
 FastMCP validates incoming tool-call arguments against the tool's function
 signature using a pydantic ``TypeAdapter`` (see ``FunctionTool.run`` in
 fastmcp's ``tools/function_tool.py``). When a client passes an argument that
-doesn't exist on the tool, the resulting ``pydantic.ValidationError`` — a
-multi-line dump ending in a pydantic.dev docs URL — is what gets sent back to
-the client as the tool-call error message, unmodified.
+doesn't exist on the tool, the resulting pydantic error — a multi-line dump
+ending in a pydantic.dev docs URL — is what gets sent back to the client as the
+tool-call error message, unmodified. FastMCP raises it as its own
+``fastmcp.exceptions.ValidationError`` with the pydantic ``ValidationError`` as
+``__cause__``.
 
 That's fine for a human debugging a script, but useless as feedback for a
 model deciding what to try next. Observed live: granite-4.0-h-micro invented
@@ -18,16 +20,32 @@ correctly listed the real argument names. See issue #19.
 
 ``ToolValidationErrorMiddleware`` intercepts exactly this case at the
 ``on_call_tool`` hook (which wraps the whole tool dispatch, including the
-pydantic validation step) and replaces "unexpected keyword argument" errors
+validation step), unwraps the pydantic error, and replaces "unexpected keyword argument" errors
 with a plain sentence naming the bad argument(s) and the tool's actual valid
 argument names. Other validation failures (missing required argument, wrong
 type) get a still-improved but more generic message, since those are rarer
 in practice and pydantic's own text for them is closer to actionable already.
 """
 
+from fastmcp.exceptions import ValidationError as FastMCPValidationError
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from mcp.types import CallToolRequestParams
 from pydantic import ValidationError
+
+
+def _pydantic_error(exc: BaseException) -> ValidationError | None:
+    """Return the pydantic ``ValidationError`` that ``exc`` is or wraps, else ``None``.
+
+    FastMCP's ``FunctionTool`` converts pydantic's call-validation error into
+    ``fastmcp.exceptions.ValidationError`` (a ``FastMCPError``, not a pydantic
+    class) with the pydantic error as ``__cause__``; other tool types can still
+    raise the pydantic error directly.
+    """
+    if isinstance(exc, ValidationError):
+        return exc
+    if isinstance(exc, FastMCPValidationError) and isinstance(exc.__cause__, ValidationError):
+        return exc.__cause__
+    return None
 
 
 class ToolValidationErrorMiddleware(Middleware):
@@ -40,8 +58,11 @@ class ToolValidationErrorMiddleware(Middleware):
     ) -> object:
         try:
             return await call_next(context)
-        except ValidationError as exc:
-            raise ValueError(await self._friendly_message(context, exc)) from exc
+        except (ValidationError, FastMCPValidationError) as exc:
+            pydantic_error = _pydantic_error(exc)
+            if pydantic_error is None:
+                raise
+            raise ValueError(await self._friendly_message(context, pydantic_error)) from exc
 
     async def _friendly_message(self, context: MiddlewareContext[CallToolRequestParams], exc: ValidationError) -> str:
         tool_name = context.message.name
