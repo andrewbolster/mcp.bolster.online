@@ -35,7 +35,7 @@ jobs:
     # Runs the exact hook config in .pre-commit-config.yaml — CI and local
     # pre-commit cannot disagree about what counts as clean, since there's
     # only one place (that file) where versions live. Covers ruff check,
-    # ruff format, mypy, gitleaks, and the hygiene hooks in one step.
+    # ruff format, ty, gitleaks, and the hygiene hooks in one step.
     - name: 🔍 Run pre-commit
       run: |
         uv run pre-commit run --all-files --show-diff-on-failure

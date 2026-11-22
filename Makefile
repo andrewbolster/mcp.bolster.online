@@ -13,7 +13,7 @@ fmt:
 	uv run ruff check . --fix --target-version=py311
 
 typecheck:
-	uv run mypy app.py --ignore-missing-imports
+	uv run ty check
 
 security:
 	uv run --with bandit bandit -r . -x ./.venv,./tests,./test_app.py,./htmlcov,./.claude -q || true

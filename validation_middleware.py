@@ -29,6 +29,7 @@ in practice and pydantic's own text for them is closer to actionable already.
 
 from fastmcp.exceptions import ValidationError as FastMCPValidationError
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
+from fastmcp.tools import ToolResult
 from mcp.types import CallToolRequestParams
 from pydantic import ValidationError
 
@@ -54,8 +55,8 @@ class ToolValidationErrorMiddleware(Middleware):
     async def on_call_tool(
         self,
         context: MiddlewareContext[CallToolRequestParams],
-        call_next: CallNext[CallToolRequestParams, object],
-    ) -> object:
+        call_next: CallNext[CallToolRequestParams, ToolResult],
+    ) -> ToolResult:
         try:
             return await call_next(context)
         except (ValidationError, FastMCPValidationError) as exc:

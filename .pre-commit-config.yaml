@@ -17,12 +17,16 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.3.1
+  # ty runs from the project environment (not an isolated hook env) so it sees
+  # the real fastmcp/pydantic types; its version is pinned in pyproject.toml.
+  - repo: local
     hooks:
-      - id: mypy
-        additional_dependencies: [types-requests]
-        args: [--ignore-missing-imports]
+      - id: ty
+        name: ty check
+        entry: uv run ty check
+        language: system
+        types: [python]
+        pass_filenames: false
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1

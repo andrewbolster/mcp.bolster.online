@@ -22,7 +22,7 @@ from fastmcp.server.auth.providers.github import GitHubProvider
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.middleware import AuthMiddleware
 from fastmcp.server.middleware.authorization import AuthContext
-from fastmcp.tools.tool import ToolAnnotations
+from mcp.types import ToolAnnotations
 from starlette.applications import Starlette
 from starlette.middleware import Middleware as StarletteMiddleware
 from starlette.middleware.cors import CORSMiddleware

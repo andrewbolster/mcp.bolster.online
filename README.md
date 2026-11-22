@@ -45,7 +45,7 @@ An MCP (Model Context Protocol) server providing curated resources and tools abo
 - **Friendly Validation Errors** - Calls with unknown or missing tool arguments get an error naming the problem and the valid arguments, not a raw pydantic trace
 - **92% Test Coverage** - Comprehensive test suite with pytest
 - **Multi-Platform Support** - Ubuntu Latest & 22.04, Python 3.11-3.13
-- **Modern Code Quality** - Ruff formatting/linting, mypy type checking
+- **Modern Code Quality** - Ruff formatting/linting, ty type checking
 - **Pre-commit Hooks** - Automated code quality checks
 - **GitHub Actions** - CI/CD with AI-powered content validation
 
@@ -73,7 +73,7 @@ uv run pytest --cov=app --cov=click_mcp --cov-report=term-missing -v
 # Run all quality checks (same as CI)
 uv run ruff check .          # Linting
 uv run ruff format --check . # Format checking
-uv run mypy app.py --ignore-missing-imports  # Type checking
+uv run ty check                # Type checking
 ```
 
 ### Running the Server

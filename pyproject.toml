@@ -51,7 +51,7 @@ message = "Bump version: {current_version} → {new_version}"
 [dependency-groups]
 dev = [
     "ruff==0.16.5",
-    "mypy==2.3.1",
+    "ty==0.0.91",
     "pre-commit>=4.2.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.24.0",
