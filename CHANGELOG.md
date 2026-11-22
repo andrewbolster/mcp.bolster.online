@@ -1,5 +1,9 @@
 # Changelog
 
+## \[0.2.7\] - 2026-11-22
+
+- fix(deploy): stage and test before stopping the service, serialise deploys, roll back on failure (#76)
+
 ## \[0.2.6\] - 2026-11-22
 
 - fix: restore friendly tool-argument errors with fastmcp 3.4.x (#73)
