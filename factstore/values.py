@@ -57,12 +57,17 @@ def _keeps(text: str, index: int) -> bool:
 
     Symbols (Unicode categories S*: '+', '$', '=' and so on) and ``# & % @`` stay, so 'C++' and 'C' remain different
     names. A punctuation mark directly between two digits also stays ('1.500' is not '1,500', '2019/20' is not
-    '2019-20', '2026-05-17' stays a date), because dropping it would merge different numbers. Everything else is
-    punctuation or spacing and is dropped.
+    '2019-20', '2026-05-17' stays a date), and so does a '-' or '.' directly before a digit that does not follow a
+    letter, a digit or the same mark (a sign or a leading point: '-5' is not '5', '.5' is not '5'), because dropping
+    them would merge different numbers. Everything else is punctuation or spacing and is dropped.
     """
     char = text[index]
     if char in _MEANINGFUL or unicodedata.category(char).startswith("S"):
         return True
+    if char in "-." and index + 1 < len(text) and text[index + 1].isdigit():
+        before = text[index - 1] if index else " "
+        if not before.isalnum() and before != char:
+            return True
     return 0 < index < len(text) - 1 and not char.isspace() and text[index - 1].isdigit() and text[index + 1].isdigit()
 
 

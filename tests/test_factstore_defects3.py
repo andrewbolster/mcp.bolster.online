@@ -32,6 +32,10 @@ class TestPunctuationInsensitiveFold:
             ("Health, Social Care & Wellbeing: Report", "health social care & wellbeing report"),
             ("snake_case", "snake case"),
             ("  Is   a ", "is A"),
+            ("Q1 - 2024", "Q1 2024"),
+            ("Report -- final", "Report final"),
+            ("co-op", "co op"),
+            ("Q1-2024 release", "q1-2024  RELEASE"),
         ],
     )
     def test_names_that_differ_only_by_punctuation_spacing_case_or_accents_are_one_name(self, one, other):
@@ -47,6 +51,9 @@ class TestPunctuationInsensitiveFold:
             ("50%", "50"),
             ("1.500", "1,500"),
             ("1.500", "1500"),
+            ("-5", "5"),
+            (".5", "5"),
+            ("x = -5", "x = 5"),
             ("2019/20", "2019-20"),
             ("2019-20", "201920"),
             ("O'Brien", "OBrien"),
@@ -97,6 +104,13 @@ class TestMatchingByTheNewFold:
         store.add_fact(ADA, "Figure B", "Equals", "number:1,500")
         assert [f["subject"] for f in store.search_facts(ADA, object="number:1.500")["facts"]] == ["Figure A"]
         assert [f["subject"] for f in store.search_facts(ADA, object="number:1,500")["facts"]] == ["Figure B"]
+
+    def test_a_negative_number_and_a_leading_point_are_not_merged_with_the_plain_number(self, store):
+        for value, subject in (("number:-5", "Change"), ("number:5", "Level"), ("number:.5", "Share")):
+            store.add_fact(ADA, subject, "Equals", value)
+        assert [f["subject"] for f in store.search_facts(ADA, object="number:-5")["facts"]] == ["Change"]
+        assert [f["subject"] for f in store.search_facts(ADA, object="number:5")["facts"]] == ["Level"]
+        assert [f["subject"] for f in store.search_facts(ADA, object="number:.5")["facts"]] == ["Share"]
 
     def test_free_text_ignores_punctuation_too(self, store):
         store.add_fact(ADA, "Release", "Has title", "Monthly Births (Northern Ireland)")
