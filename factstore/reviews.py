@@ -218,20 +218,38 @@ def due_for_review(
     object_kind: str | None = None,
     created_before: str | None = None,
     order: str = "oldest_reviewed",
+    reviewed: bool | None = None,
+    include_never_reviewed: bool = True,
 ) -> dict[str, Any]:
     """The actor's own facts last reviewed (or, never reviewed, created) before ``before``.
 
     ``action``, ``subject`` (aliases resolved), ``object_kind`` and ``created_before`` narrow the list. ``order`` is
     ``oldest_reviewed`` (default), ``lowest_confidence`` (then oldest) or ``newest`` (by creation).
+
+    Review state, with the same meaning as in ``search_facts``: ``reviewed`` True keeps only facts that have been
+    reviewed, False only those never reviewed. ``include_never_reviewed`` says whether a never-reviewed fact counts,
+    its creation time being its baseline. It is True by default here (a fact nobody has reviewed is exactly what a
+    review queue is for), where ``search_facts`` defaults it to False; set it False to list only facts whose last
+    review is old.
     """
     if order not in DUE_ORDERS:
         raise ValidationError(f"order must be one of {', '.join(DUE_ORDERS)}.")
+    if reviewed is False and not include_never_reviewed:
+        raise ValidationError(
+            "reviewed=False asks for never-reviewed facts, which include_never_reviewed=False excludes; "
+            "use one or the other."
+        )
     if before is None:
         cutoff = iso(datetime.now(UTC) - timedelta(days=cfg.review_interval_days))
     else:
         cutoff = iso(parse_instant(before))
-    where: list[str] = ["created_by = ?", "COALESCE(reviewed_at, created_at) < ?"]
+    baseline = "COALESCE(reviewed_at, created_at) < ?" if include_never_reviewed else "reviewed_at < ?"
+    where: list[str] = ["created_by = ?", baseline]
     params: list[Any] = [actor, cutoff]
+    if reviewed is True:
+        where.append("reviewed_at IS NOT NULL")
+    elif reviewed is False:
+        where.append("reviewed_at IS NULL")
     if action is not None:
         where.append("action_f = ?")
         params.append(fold(check_text("action", action, cfg)))

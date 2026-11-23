@@ -42,11 +42,50 @@ def fold_case(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
-def fold(text: str) -> str:
-    """The form names, actions and free text are matched in: case-, whitespace- and accent-insensitive, so
-    'Is a' and ' is   A ' match, and so do 'Zoë', 'ZOE' and 'zoe'."""
+def fold_accents(text: str) -> str:
+    """Case-, whitespace- and accent-insensitive form (the schema version 3 fold). Punctuation is significant."""
     decomposed = unicodedata.normalize("NFKD", text)
     return fold_case("".join(ch for ch in decomposed if not unicodedata.combining(ch)))
+
+
+#: Characters that carry meaning in a name even though they are not letters or digits ('C++', 'AT&T', 'C#', '50%').
+_MEANINGFUL = frozenset("#&%@")
+
+
+def _keeps(text: str, index: int) -> bool:
+    """Whether the non-alphanumeric character at ``index`` stays in a folded name.
+
+    Symbols (Unicode categories S*: '+', '$', '=' and so on) and ``# & % @`` stay, so 'C++' and 'C' remain different
+    names. A punctuation mark directly between two digits also stays ('1.500' is not '1,500', '2019/20' is not
+    '2019-20', '2026-05-17' stays a date), and so does a '-' or '.' directly before a digit that does not follow a
+    letter, a digit or the same mark (a sign or a leading point: '-5' is not '5', '.5' is not '5'), because dropping
+    them would merge different numbers. Everything else is punctuation or spacing and is dropped.
+    """
+    char = text[index]
+    if char in _MEANINGFUL or unicodedata.category(char).startswith("S"):
+        return True
+    if char in "-." and index + 1 < len(text) and text[index + 1].isdigit():
+        before = text[index - 1] if index else " "
+        if not before.isalnum() and before != char:
+            return True
+    return 0 < index < len(text) - 1 and not char.isspace() and text[index - 1].isdigit() and text[index + 1].isdigit()
+
+
+def fold(text: str) -> str:
+    """The form names, actions and free text are matched in: case-, whitespace-, accent- and punctuation-insensitive,
+    so 'Is a' and ' is   A ' match, 'Zoë', 'ZOE' and 'zoe' match, and 'Monthly Births (Northern Ireland)' matches
+    'Monthly Births Northern Ireland'.
+
+    Every run of characters that are neither letters, digits nor meaningful symbols (see ``_keeps``) becomes one
+    space. A name made only of such characters ('(?)') would fold to nothing, so it falls back to
+    ``fold_accents`` and stays distinguishable. Apostrophes and hyphens are punctuation: "O'Brien" is 'o brien'
+    and 'OBrien' is 'obrien', which stay different names.
+    """
+    decomposed = unicodedata.normalize("NFKD", text)
+    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    kept = "".join(ch if ch.isalnum() or _keeps(stripped, i) else " " for i, ch in enumerate(stripped))
+    folded = fold_case(kept)
+    return folded or fold_accents(text)
 
 
 def actor_id(actor: str) -> str:
