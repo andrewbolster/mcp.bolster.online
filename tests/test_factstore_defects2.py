@@ -127,6 +127,16 @@ class TestReviewerSideOutcomes:
             entries = [o for o in store.review_outcomes(who, role="all")["outcomes"] if o["fact_id"] == first["id"]]
             assert [(o["reviewer"], o["outcome"]) for o in entries] == [(who, expected)]
 
+    def test_on_a_public_fact_a_reviewer_still_sees_only_their_own_entry(self, store):
+        public = add(store, "Ada Example", "Likes", "Jam", public=True)
+        store.mark_reviewed(BOB, public["id"], "confirmed", note="bob's view")
+        store.mark_reviewed(CY, public["id"], "unsure", note="cy's view")
+        for who, role in ((BOB, "reviewer"), (BOB, "all"), (CY, "reviewer"), (CY, "all")):
+            entries = store.review_outcomes(who, role=role)["outcomes"]
+            assert [(o["reviewer"], o["role"]) for o in entries] == [(who, "reviewer")], (who, role)
+        assert {o["reviewer"] for o in store.review_outcomes(ADA)["outcomes"]} == {BOB, CY}
+        assert [o["note"] for o in store.review_outcomes(ADA, role="reviewer")["outcomes"]] == []
+
     def test_the_fact_wording_is_hidden_once_the_reviewers_access_has_ended(self, reviewed):
         store, first, second = reviewed
         entries = store.review_outcomes(BOB, role="reviewer")["outcomes"]
