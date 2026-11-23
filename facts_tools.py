@@ -137,13 +137,29 @@ def register_fact_tools(server: FastMCP) -> None:
         min_confidence: Annotated[float | None, "Only facts with at least this confidence"] = None,
         include_negative: Annotated[bool, "Also return facts with confidence 0 or below (falsifications)"] = False,
         valid_at: Annotated[str | None, "Only facts valid at this instant; open-ended bounds count as valid"] = None,
-        valid_from: Annotated[str | None, "With valid_to: only facts whose validity overlaps this range"] = None,
-        valid_to: Annotated[str | None, "Upper end of the validity range to overlap"] = None,
-        q: Annotated[str | None, "Free text matched within subject, object and action"] = None,
+        valid_from: Annotated[str | None, "Start of a validity window: facts whose period overlaps it"] = None,
+        valid_to: Annotated[str | None, "End of the validity window (inclusive of its period)"] = None,
+        valid_within: Annotated[
+            bool, "With valid_from and/or valid_to: only facts whose period lies ENTIRELY inside the window"
+        ] = False,
+        has_period: Annotated[
+            bool | None, "true: only facts with a valid_from or valid_to; false: only facts with neither"
+        ] = None,
+        q: Annotated[
+            str | None,
+            "Free text: every word must appear (any order, ignoring case and accents) in the subject, object, "
+            "action, attribute names and values, or references",
+        ] = None,
         attribute_key: Annotated[str | None, "Only facts that have this attribute"] = None,
         attribute_value: Annotated[str | None, "With attribute_key: the attribute must equal this"] = None,
         reviewed_before: Annotated[
-            str | None, "Only facts last reviewed (or, if never, created) before this time"
+            str | None, "Only facts whose last review was before this time (never-reviewed facts are excluded)"
+        ] = None,
+        include_never_reviewed: Annotated[
+            bool, "With reviewed_before: also include never-reviewed facts, counting creation as the baseline"
+        ] = False,
+        reviewed: Annotated[
+            bool | None, "true: only facts that have been reviewed; false: only those never reviewed"
         ] = None,
         limit: Annotated[int, "Maximum facts to return (default 50, max 200)"] = CFG.default_limit,
         offset: Annotated[int, "How many matches to skip, to read the next page (default 0)"] = 0,
@@ -154,9 +170,14 @@ def register_fact_tools(server: FastMCP) -> None:
         when more follow this page (repeat with offset=offset+count). A kind prefix on a name ('org:PPS') or
         subject_kind/object_kind settles an alias that several entities answer to.
         Only positive-confidence facts are returned unless include_negative=true.
+        valid_from/valid_to match facts whose period OVERLAPS the window (facts with no period or an open bound
+        match too); valid_within=true keeps only facts that fit entirely inside it, and has_period=true drops
+        facts with no period. A reply may carry `warnings`, e.g. about a name like 'claim:Foo' whose prefix is not
+        a configured kind and so is matched as literal text.
         Example (a partner's facts): first search subject='me', action='Partner' to find the entity, then
         search subject=<that entity>.
         Example (who was my partner in 2013): subject='me', action='Partner', valid_at='2013-05-17'.
+        Example (facts that start and end within 2020-2023): valid_from='2020', valid_to='2023', valid_within=true.
         """
         return await _run(
             get_store().search_facts,
@@ -164,8 +185,9 @@ def register_fact_tools(server: FastMCP) -> None:
             scope=scope, subject=subject, action=action, object=object, subject_kind=subject_kind,
             object_kind=object_kind, subject_type=subject_type, object_type=object_type,
             min_confidence=min_confidence, include_negative=include_negative, valid_at=valid_at,
-            valid_from=valid_from, valid_to=valid_to, q=q, attribute_key=attribute_key,
-            attribute_value=attribute_value, reviewed_before=reviewed_before, limit=limit, offset=offset,
+            valid_from=valid_from, valid_to=valid_to, valid_within=valid_within, has_period=has_period, q=q,
+            attribute_key=attribute_key, attribute_value=attribute_value, reviewed_before=reviewed_before,
+            include_never_reviewed=include_never_reviewed, reviewed=reviewed, limit=limit, offset=offset,
         )  # fmt: skip
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
@@ -282,11 +304,11 @@ def register_fact_tools(server: FastMCP) -> None:
             "(default -1.0 for a believed fact, +1.0 for a falsification)",
         ] = None,
     ) -> dict[str, Any]:
-        """Record a review. 'confirmed' stamps the fact as reviewed now. 'disputed' by someone other than the owner
-        creates your own private fact on the same triple with the opposite sign of the disputed fact (-1.0 for a
-        believed fact, +1.0 for one already marked false, or the graded `confidence` you state) that references
-        the disputed one; the owner's fact is untouched, and the owner sees only that a dispute exists.
-        Any outcome closes your open review requests on the fact.
+        """Record a review. 'confirmed' stamps the fact as reviewed now. 'disputed' creates your own private fact on
+        the same triple with the opposite sign of the disputed fact (-1.0 for a believed fact, +1.0 for one already
+        marked false, or the graded `confidence` you state) that references the disputed one; the disputed fact is
+        untouched, and its owner sees only that a dispute exists. You cannot dispute your own fact: use update_fact
+        (lower its confidence, or set valid_to). Any outcome closes your open review requests on the fact.
 
         Example: id='0198f6d2-…', outcome='confirmed'. Example: outcome='disputed', confidence=-0.4.
         """
@@ -297,14 +319,21 @@ def register_fact_tools(server: FastMCP) -> None:
         since: Annotated[str | None, f"Only entries at or after this time. {WHEN_FORMATS}"] = None,
         limit: Annotated[int, "Maximum entries to return (default 50, max 200)"] = CFG.default_limit,
         offset: Annotated[int, "How many entries to skip, to read the next page (default 0)"] = 0,
+        role: Annotated[
+            Literal["owner", "reviewer", "all"],
+            "'owner' (default): what people said about YOUR facts. 'reviewer': the reviews YOU wrote on any fact, "
+            "confirmed ones included. 'all': both.",
+        ] = "owner",
     ) -> dict[str, Any]:
-        """Recent reviews (confirmed, disputed, unsure) that people have made on YOUR facts, newest first.
+        """Recent reviews (confirmed, disputed, unsure), newest first.
 
-        Returns {count, total, offset, limit, truncated, outcomes}; each entry has the fact (id, subject_ref,
-        action, object_ref), the reviewer, the outcome, the note and the time. A dispute shows as 'disputed': the
-        reviewer's own counter-fact stays private to them. Example: since='2026-01-01'.
+        Returns {count, total, offset, limit, truncated, outcomes}; each entry has the fact (id, and subject_ref,
+        action, object_ref while you can still read it), the reviewer, the outcome, the note, the time and your
+        `role` in it ('owner' or 'reviewer'). On someone else's fact you see only your own entry. A dispute shows as
+        'disputed': the reviewer's own counter-fact stays private to them.
+        Example: since='2026-01-01'. Example: role='reviewer' to list what you reviewed.
         """
-        return await _run(get_store().review_outcomes, _login(), since, limit, offset)
+        return await _run(get_store().review_outcomes, _login(), since, limit, offset, role)
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def pending_reviews(

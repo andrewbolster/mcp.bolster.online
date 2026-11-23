@@ -5,6 +5,7 @@ import math
 import random
 import re
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -36,14 +37,22 @@ def uuid7(now_ms: int | None = None) -> uuid.UUID:
     return uuid.UUID(int=value)
 
 
-def fold(text: str) -> str:
-    """Case- and whitespace-insensitive form, so 'Is a' and ' is   A ' match."""
+def fold_case(text: str) -> str:
+    """Case- and whitespace-insensitive form. Used where accents are significant, i.e. for actor identifiers."""
     return " ".join(text.split()).casefold()
 
 
+def fold(text: str) -> str:
+    """The form names, actions and free text are matched in: case-, whitespace- and accent-insensitive, so
+    'Is a' and ' is   A ' match, and so do 'Zoë', 'ZOE' and 'zoe'."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return fold_case("".join(ch for ch in decomposed if not unicodedata.combining(ch)))
+
+
 def actor_id(actor: str) -> str:
-    """The canonical form of an actor identifier (logins are case-insensitive)."""
-    cleaned = fold(actor) if isinstance(actor, str) else ""
+    """The canonical form of an actor identifier. Logins are case-insensitive but accents are significant: 'josé'
+    and 'jose' are different actors, so one can never read the other's private facts."""
+    cleaned = fold_case(actor) if isinstance(actor, str) else ""
     if not cleaned:
         raise ValidationError("actor must be a non-empty string.")
     if len(cleaned) > 100:
@@ -187,8 +196,65 @@ def check_kind(label: str, value: str | None, cfg: Config) -> str | None:
         return None
     kind = fold(value)
     if kind not in cfg.kinds:
-        raise ValidationError(f"{label} must be one of {sorted(cfg.kinds)}.")
+        raise ValidationError(
+            f"{label} {value!r} is not a configured kind. The configured kinds are {', '.join(sorted(cfg.kinds))}. "
+            f"A name written '{value}:Something' is not parsed as a kind: it is stored as that literal text."
+        )
     return kind
+
+
+#: ``word:text`` where the text does not start with a space or ``//`` (so 'Meeting: standup' and URLs are left alone).
+_KIND_LIKE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):(?![\s/])\S")
+
+
+def kind_prefix_warnings(cfg: Config, names: dict[str, Any]) -> list[str]:
+    """Advice for names that look like a kind prefix the store does not know.
+
+    An unrecognised prefix stays part of the name (``claim:Foo`` is stored as the literal text 'claim:Foo'), which
+    is rarely what a caller meant, so say so. ``names`` maps a label ('subject', 'object', ...) to the value the
+    caller supplied; values that are not strings are ignored.
+    """
+    warnings: list[str] = []
+    for label, value in names.items():
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        found = _KIND_LIKE.match(text)
+        if found and fold(found.group(1)) not in cfg.kinds:
+            warnings.append(
+                f"{label} {text!r} looks like a kind prefix, but {found.group(1)!r} is not a configured kind "
+                f"({', '.join(sorted(cfg.kinds))}), so it is stored as the literal text {text!r}. Use a configured "
+                "prefix, or ignore this if the colon is part of the name."
+            )
+    return warnings
+
+
+def with_warnings(result: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
+    """``result`` plus a ``warnings`` list, but only when there is something to say."""
+    return {**result, "warnings": warnings} if warnings else result
+
+
+def extras_text(attributes: str | None, refs: str | None) -> str:
+    """Folded text of a fact's attributes (keys and values, nested too) and references, for free-text search."""
+    parts: list[str] = []
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, inner in value.items():
+                parts.append(str(key))
+                walk(inner)
+        elif isinstance(value, list):
+            for inner in value:
+                walk(inner)
+        elif value is not None:
+            parts.append(str(value))
+
+    for raw in (attributes, refs):
+        try:
+            walk(json.loads(raw) if raw else None)
+        except (TypeError, ValueError):
+            parts.append(str(raw))
+    return fold(" ".join(parts))
 
 
 def check_confidence(value: Any) -> float:

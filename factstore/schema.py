@@ -1,13 +1,16 @@
-"""SQLite schema, version handling and connections."""
+"""SQLite schema, version handling, in-place migrations and connections."""
 
 import contextlib
 import sqlite3
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 from .errors import SchemaVersionError
+from .values import extras_text, fold
 
-SCHEMA_VERSION = 2
+#: The schema this code writes. Version 3 matches names accent-insensitively (the ``*_f`` columns hold
+#: ``values.fold`` of the name); the table layout is the same as version 2.
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -67,6 +70,8 @@ CREATE INDEX IF NOT EXISTS review_requests_fact ON review_requests (fact_id, sta
 def connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=5)
     conn.row_factory = sqlite3.Row
+    # free-text search also covers attributes and references, folded the same way names are
+    conn.create_function("fact_extras", 2, extras_text, deterministic=True)
     return conn
 
 
@@ -81,22 +86,77 @@ def session(path: Path) -> Generator[sqlite3.Connection]:
         conn.close()
 
 
+def _stored_version(conn: sqlite3.Connection) -> int | None:
+    """The schema version a database was written with, or None for a database with no schema yet."""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'").fetchone() is None:
+        return None
+    row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+    return row[0] if row else None
+
+
+def _refold_names(conn: sqlite3.Connection) -> None:
+    """Version 2 -> 3: recompute the folded name columns with the accent-insensitive ``fold``."""
+    rows = conn.execute("SELECT id, subject, action, object, subject_f, action_f, object_f FROM facts").fetchall()
+    changed = []
+    for row in rows:
+        folded = (fold(row["subject"]), fold(row["action"]), fold(row["object"]))
+        if folded != (row["subject_f"], row["action_f"], row["object_f"]):
+            changed.append((*folded, row["id"]))
+    conn.executemany("UPDATE facts SET subject_f = ?, action_f = ?, object_f = ? WHERE id = ?", changed)
+
+
+#: Upgrade steps, keyed by the version each one upgrades FROM (to that version + 1). Each runs inside the one
+#: transaction that also bumps ``schema_version``, so a failure leaves the database as it was.
+MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {2: _refold_names}
+
+
+def _migrate(conn: sqlite3.Connection, path: Path, found: int) -> None:
+    """Bring a database from ``found`` up to SCHEMA_VERSION in ONE transaction, after taking a backup copy."""
+    backup = path.with_name(f"{path.name}.pre-v{found}.bak")
+    if not backup.exists():
+        target = sqlite3.connect(backup)
+        try:
+            conn.backup(target)
+        finally:
+            target.close()
+    conn.isolation_level = None  # explicit transaction control
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        # another process may have migrated while this one waited for the write lock
+        current = _stored_version(conn) or found
+        while current < SCHEMA_VERSION:
+            MIGRATIONS[current](conn)
+            current += 1
+            conn.execute("UPDATE schema_version SET version = ?", (current,))
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.isolation_level = "DEFERRED"  # the default behaviour, restored for the statements that follow
+
+
 def initialise(path: Path) -> None:
-    """Create the database if it is new; refuse one written by a different schema version."""
+    """Create the database if it is new, upgrade an older one in place, refuse one this code cannot understand.
+
+    A database written by a newer schema is refused untouched. An older one is migrated automatically when every
+    step from its version to this one is known (``MIGRATIONS``); otherwise it is refused and the data has to be
+    exported with the code that wrote it and imported here.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = connect(path)
     try:
         conn.execute("PRAGMA journal_mode=WAL")
-        has_version = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'")
-        row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone() if has_version.fetchone() else None
-        found = row[0] if row else None
+        found = _stored_version(conn)
         if found is not None and found != SCHEMA_VERSION:
             relation = "newer" if found > SCHEMA_VERSION else "older"
-            raise SchemaVersionError(
-                f"{path} has schema version {found}, which is {relation} than the version {SCHEMA_VERSION} this code "
-                "understands. Refusing to open it so the data is not damaged: use matching code, or export the data "
-                "with the code that wrote it and import it here (python -m factstore export/import)."
-            )
+            if relation == "newer" or any(step not in MIGRATIONS for step in range(found, SCHEMA_VERSION)):
+                raise SchemaVersionError(
+                    f"{path} has schema version {found}, which is {relation} than the version {SCHEMA_VERSION} this "
+                    "code understands. Refusing to open it so the data is not damaged: use matching code, or export "
+                    "the data with the code that wrote it and import it here (python -m factstore export/import)."
+                )
+            _migrate(conn, path, found)
         with conn:
             conn.executescript(SCHEMA)
             if found is None:

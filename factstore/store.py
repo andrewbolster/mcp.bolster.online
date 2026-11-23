@@ -24,6 +24,7 @@ from .values import (
     check_text,
     fold,
     iso,
+    kind_prefix_warnings,
     like,
     now_iso,
     page_info,
@@ -32,6 +33,7 @@ from .values import (
     parse_ref,
     parse_when,
     uuid7,
+    with_warnings,
 )
 
 
@@ -71,13 +73,16 @@ class FactStore:
         """Store a fact. Names are resolved through alias facts (and 'me') so each entity has one stored name.
 
         With ``check_types`` the reply also lists, under ``untyped``, the entity names that have no type fact yet.
+        A name that looks like a kind prefix the store does not know (``claim:Foo``) is kept as literal text, and
+        the reply says so under ``warnings``.
         """
         who = actor_id(actor)
         with session(self.path) as conn:
-            return self._add(
+            stored = self._add(
                 conn, who, subject, action, object, confidence, valid_from, valid_to, public, attributes, references,
                 check_types,
             )  # fmt: skip
+        return with_warnings(stored, kind_prefix_warnings(self.config, {"subject": subject, "object": object}))
 
     def add_many(self, actor: str, facts: list[dict[str, Any]]) -> dict[str, Any]:
         """Store up to ``Config.max_batch`` facts in one transaction: all of them are written, or none are.
@@ -123,7 +128,12 @@ class FactStore:
                     error.args = (f"Item {index}: {error}",)
                     raise
                 ids.append(stored["id"])
-        return {"count": len(ids), "ids": ids}
+        notes = [
+            f"Item {index}: {warning}"
+            for index, item in enumerate(facts)
+            for warning in kind_prefix_warnings(cfg, {"subject": item["subject"], "object": item["object"]})
+        ]
+        return with_warnings({"count": len(ids), "ids": ids}, notes)
 
     def _add(
         self,
@@ -211,7 +221,9 @@ class FactStore:
                     attrs, refs, who, now_iso(), row["id"],
                 ),
             )  # fmt: skip
-            return fact_dict(fetch_visible(conn, who, row["id"], "mine"))
+            updated = fact_dict(fetch_visible(conn, who, row["id"], "mine"))
+        renamed = {label: value for label, value in (("subject", subject), ("object", object)) if value is not UNSET}
+        return with_warnings(updated, kind_prefix_warnings(cfg, renamed))
 
     def delete_fact(self, actor: str, fact_id: str) -> dict[str, Any]:
         """Delete one of the actor's own facts, with the review requests and reviews that point at it."""
@@ -251,7 +263,8 @@ class FactStore:
                     (target.name, target.f, target.kind, who, now, existing["id"]),
                 )
                 fact_id = existing["id"]
-            return fact_dict(fetch_visible(conn, who, fact_id, "mine"))
+            bound = fact_dict(fetch_visible(conn, who, fact_id, "mine"))
+        return with_warnings(bound, kind_prefix_warnings(cfg, {"name": name}))
 
     # ----------------------------------------------------------------------------------------- reading
 
@@ -284,6 +297,10 @@ class FactStore:
         attribute_key: str | None = None,
         attribute_value: str | None = None,
         reviewed_before: str | None = None,
+        include_never_reviewed: bool = False,
+        reviewed: bool | None = None,
+        has_period: bool | None = None,
+        valid_within: bool = False,
         limit: int | None = None,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -293,6 +310,19 @@ class FactStore:
         prefix (or ``subject_kind``/``object_kind``) settles an alias that several entities answer to. Only
         positive-confidence facts are returned unless ``include_negative`` is set. The reply carries ``total`` (all
         matches), ``offset``, ``limit`` and ``truncated`` (true when more matches follow this page).
+
+        Validity: ``valid_at`` keeps facts valid at an instant. ``valid_from``/``valid_to`` keep facts whose period
+        OVERLAPS that window (a bound a fact leaves open counts as reaching it), or, with ``valid_within=True``,
+        only facts whose period lies ENTIRELY inside the window (so a fact with no period, or an open bound where
+        the window has one, is excluded). ``has_period`` keeps facts that have a valid_from or valid_to (True) or
+        neither (False).
+
+        Review state: ``reviewed_before`` keeps facts last REVIEWED before a time (never-reviewed facts are not
+        included unless ``include_never_reviewed``, which treats creation as the baseline); ``reviewed`` keeps facts
+        that have been reviewed (True) or never have (False).
+
+        ``q`` matches every word (any order, ignoring case and accents) in the subject, object, action, attribute
+        names and values, and references.
         """
         who = actor_id(actor)
         cfg = self.config
@@ -333,16 +363,31 @@ class FactStore:
                     "(valid_from_key IS NULL OR valid_from_key <= ?) AND (valid_to_key IS NULL OR valid_to_key > ?)"
                 )
                 params.extend([key, key])
-            if valid_to is not None:  # overlap with [valid_from, valid_to]
+            if valid_within and valid_from is None and valid_to is None:
+                raise ValidationError("valid_within needs valid_from and/or valid_to: the window the period must fit.")
+            if valid_to is not None:
                 _, key = parse_when(valid_to, end=True)
-                where.append("(valid_from_key IS NULL OR valid_from_key < ?)")
+                if valid_within:  # the fact ends no later than the window does
+                    where.append("(valid_to_key IS NOT NULL AND valid_to_key <= ?)")
+                else:  # overlap with [valid_from, valid_to]
+                    where.append("(valid_from_key IS NULL OR valid_from_key < ?)")
                 params.append(key)
             if valid_from is not None:
                 _, key = parse_when(valid_from)
-                where.append("(valid_to_key IS NULL OR valid_to_key > ?)")
+                if valid_within:  # the fact starts no earlier than the window does
+                    where.append("(valid_from_key IS NOT NULL AND valid_from_key >= ?)")
+                else:
+                    where.append("(valid_to_key IS NULL OR valid_to_key > ?)")
                 params.append(key)
+            if has_period is True:
+                where.append("(valid_from_key IS NOT NULL OR valid_to_key IS NOT NULL)")
+            elif has_period is False:
+                where.append("(valid_from_key IS NULL AND valid_to_key IS NULL)")
             for term in fold(q or "").split():  # every word must appear, in any order
-                where.append("(subject_f || ' ' || object_f || ' ' || action_f) LIKE ? ESCAPE '\\'")
+                where.append(
+                    "(subject_f || ' ' || object_f || ' ' || action_f || ' ' || fact_extras(attributes, refs)) "
+                    "LIKE ? ESCAPE '\\'"
+                )
                 params.append(like(term))
             if attribute_key is not None:
                 path = f'$."{check_attribute_key(attribute_key)}"'
@@ -354,19 +399,32 @@ class FactStore:
                     params.extend([path, str(attribute_value)])
             elif attribute_value is not None:
                 raise ValidationError("attribute_value needs attribute_key.")
+            if reviewed is False and reviewed_before is not None and not include_never_reviewed:
+                raise ValidationError(
+                    "reviewed=False (never reviewed) cannot be combined with reviewed_before unless "
+                    "include_never_reviewed is set: reviewed_before only matches facts that have been reviewed."
+                )
             if reviewed_before is not None:
-                where.append("COALESCE(reviewed_at, created_at) < ?")
+                if include_never_reviewed:
+                    where.append("COALESCE(reviewed_at, created_at) < ?")
+                else:
+                    where.append("(reviewed_at IS NOT NULL AND reviewed_at < ?)")
                 params.append(iso(parse_instant(reviewed_before)))
+            if reviewed is True:
+                where.append("reviewed_at IS NOT NULL")
+            elif reviewed is False:
+                where.append("reviewed_at IS NULL")
             clause = " AND ".join(where)
             total = conn.execute(f"SELECT COUNT(*) FROM facts WHERE {clause}", params).fetchone()[0]  # nosec B608
             rows = conn.execute(
                 f"SELECT * FROM facts WHERE {clause} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",  # nosec B608
                 [*params, size, skip],
             ).fetchall()
-            return {
+            found = {
                 **page_info(limit=size, offset=skip, count=len(rows), total=total),
                 "facts": [fact_dict(row) for row in rows],
             }
+        return with_warnings(found, kind_prefix_warnings(cfg, {"subject": subject, "object": object}))
 
     def describe_entity(self, actor: str, name: str, *, scope: str = "mine") -> dict[str, Any]:
         """Canonical name, aliases, types (direct and inherited), fact counts and when it was last reviewed.
@@ -400,7 +458,7 @@ class FactStore:
                 is not None
             )
             direct, inherited = types_of(conn, cfg, who, scope, ent.names)
-            return {
+            described = {
                 "name": ent.canonical.name,
                 "kind": ent.canonical.kind,
                 "ref": str(ent.canonical),
@@ -412,13 +470,15 @@ class FactStore:
                 "facts_as_object": counts["object"],
                 "last_reviewed": last,
             }
+        return with_warnings(described, kind_prefix_warnings(cfg, {"name": name}))
 
     def relationships_between(
         self, actor: str, a: str, b: str, *, scope: str = "mine", max_depth: int = 1
     ) -> dict[str, Any]:
         who = actor_id(actor)
         with session(self.path) as conn:
-            return relationships_between(conn, self.config, who, a, b, scope=scope, max_depth=max_depth)
+            found = relationships_between(conn, self.config, who, a, b, scope=scope, max_depth=max_depth)
+        return with_warnings(found, kind_prefix_warnings(self.config, {"a": a, "b": b}))
 
     # ----------------------------------------------------------------------------------------- reviews
 
@@ -465,12 +525,22 @@ class FactStore:
             )  # fmt: skip
 
     def review_outcomes(
-        self, actor: str, since: str | None = None, limit: int | None = None, offset: int = 0
+        self,
+        actor: str,
+        since: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        role: str = "owner",
     ) -> dict[str, Any]:
-        """Review entries (confirmed, disputed, unsure) that others and you have made on the actor's own facts."""
+        """Review entries (confirmed, disputed, unsure), newest first.
+
+        ``role='owner'`` (default) lists what anyone has said about the actor's own facts; ``'reviewer'`` lists the
+        reviews the actor wrote themselves, on any fact; ``'all'`` lists both. A reviewer sees only their own
+        entries on someone else's fact, and the fact's wording only while they can still read it.
+        """
         who = actor_id(actor)
         with session(self.path) as conn:
-            return reviews.review_outcomes(conn, self.config, who, since, limit, offset)
+            return reviews.review_outcomes(conn, self.config, who, since, limit, offset, role)
 
     # ----------------------------------------------------------------------------------------- portability
 
@@ -499,7 +569,7 @@ class FactStore:
         cfg = self.config
         alias = fold(action_text) == fold(cfg.alias_action)
         s_raw = parse_ref("subject", subject, cfg)
-        if s_raw.kind == cfg.actor_kind and s_raw.f != who:
+        if s_raw.kind == cfg.actor_kind and s_raw.f != fold(who):
             raise ValidationError(f"{cfg.actor_kind}: names can only refer to yourself ({cfg.actor_kind}:{who}).")
         if alias:
             if is_self_token(cfg, s_raw):
