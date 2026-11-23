@@ -9,6 +9,7 @@ so it can be wrapped as MCP tools, a CLI or an HTTP API without change.
 from .config import Config
 from .errors import (
     AmbiguousEntityError,
+    DatabaseBusyError,
     FactsError,
     NoSelfBindingError,
     NotFoundError,
@@ -25,6 +26,7 @@ __all__ = [
     "UNSET",
     "AmbiguousEntityError",
     "Config",
+    "DatabaseBusyError",
     "FactStore",
     "FactsError",
     "NoSelfBindingError",

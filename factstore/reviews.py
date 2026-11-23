@@ -1,8 +1,8 @@
 """Reviews: any actor can ask another actor to review a fact, and anyone who can see a fact can review it.
 
 Reviewing is about a fact only. A review never edits somebody else's fact: a dispute by someone other than the
-owner becomes the reviewer's own fact with confidence -1 that points back at the disputed one (this is a fact
-store, not a reality store).
+owner becomes the reviewer's own fact, with the opposite sign of the disputed one, that points back at it (this is
+a fact store, not a reality store). An owner cannot dispute their own fact: they change it with update_fact.
 """
 
 import json
@@ -31,6 +31,10 @@ from .values import (
 )
 
 OUTCOMES = ("confirmed", "disputed", "unsure")
+OUTCOME_ROLES = ("owner", "reviewer", "all")
+
+#: Facts an actor may read only because they were asked to review them and the request is still open.
+_OPEN_GRANTS = "SELECT fact_id FROM review_requests WHERE requested_of = ? AND status = 'open'"
 
 
 def _note(note: str | None, cfg: Config) -> str | None:
@@ -104,25 +108,25 @@ def mark_reviewed(
 ) -> dict[str, Any]:
     """Record the actor's review of a fact they can see.
 
-    ``confirmed`` also stamps the fact's reviewed_by/reviewed_at. ``disputed`` by someone other than the owner
-    creates the reviewer's own fact on the same triple, with the opposite sign of the disputed fact (-1.0 for a
-    believed fact, +1.0 for a falsification, or the graded ``confidence`` the reviewer states), referencing the
-    disputed one; the owner's fact is untouched. ``unsure`` only logs. Every outcome closes the actor's open
-    requests on the fact.
+    ``confirmed`` also stamps the fact's reviewed_by/reviewed_at. ``disputed`` creates the reviewer's own fact on the
+    same triple, with the opposite sign of the disputed fact (-1.0 for a believed fact, +1.0 for a falsification, or
+    the graded ``confidence`` the reviewer states), referencing the disputed one; the disputed fact is untouched.
+    An owner cannot dispute their own fact (it is rejected: change it with update_fact). ``unsure`` only logs.
+    Every outcome closes the actor's open requests on the fact.
     """
     if outcome not in OUTCOMES:
         raise ValidationError(f"outcome must be one of {', '.join(OUTCOMES)}.")
     fact = fetch_visible(conn, actor, fact_id, "all")
+    if outcome == "disputed" and fact["created_by"] == actor:
+        raise ValidationError(
+            "You cannot dispute your own fact. To change what you believe, use update_fact: lower its confidence "
+            "(a negative value records that it is false) or set valid_to if it stopped being true. "
+            "'confirmed' and 'unsure' reviews of your own facts are fine."
+        )
     counter_confidence: float | None = None
-    if confidence is not None:
-        if outcome != "disputed":
-            raise ValidationError("confidence applies to a 'disputed' outcome only.")
-        if fact["created_by"] == actor:
-            raise ValidationError(
-                "An owner's dispute of their own fact is only logged; confidence applies to a reviewer's "
-                "counter-fact. Use update_fact to change the fact's confidence."
-            )
-    if outcome == "disputed" and fact["created_by"] != actor:
+    if confidence is not None and outcome != "disputed":
+        raise ValidationError("confidence applies to a 'disputed' outcome only.")
+    if outcome == "disputed":
         counter_confidence = _counter_confidence(fact["confidence"], confidence)
     review_id, now = str(uuid7()), now_iso()
     clean_note = _note(note, cfg)
@@ -287,13 +291,25 @@ def review_outcomes(
     since: str | None = None,
     limit: int | None = None,
     offset: int = 0,
+    role: str = "owner",
 ) -> dict[str, Any]:
-    """Recent review entries on the actor's own facts, newest first, optionally only those at or after ``since``.
+    """Recent review entries, newest first, optionally only those at or after ``since``.
 
-    Each entry names the fact it concerns (triple and id), the reviewer, the outcome and the note. A dispute is
+    ``role`` chooses whose entries: ``owner`` (default) is what anyone has said about the actor's own facts,
+    ``reviewer`` is the reviews the actor wrote themselves (on any fact, confirmed ones included), ``all`` is both.
+    Each entry names the fact (id and, when the actor can read it, its triple), the reviewer, the outcome, the note
+    and the actor's ``role`` in it. A reviewer only ever gets their own entries on someone else's fact, and sees
+    the fact's wording only while they can still read it (its request is open or the fact is public). A dispute is
     reported as the outcome 'disputed': the reviewer's counter-fact itself stays private to the reviewer.
     """
-    where, params = ["f.created_by = ?"], [actor]
+    if role not in OUTCOME_ROLES:
+        raise ValidationError(f"role must be one of {', '.join(OUTCOME_ROLES)}.")
+    scope = {
+        "owner": "f.created_by = ?",
+        "reviewer": "r.reviewer = ?",
+        "all": "(f.created_by = ? OR r.reviewer = ?)",
+    }[role]
+    where, params = [scope], [actor] * scope.count("?")
     if since is not None:
         where.append("r.at >= ?")
         params.append(iso(parse_instant(since)))
@@ -304,26 +320,32 @@ def review_outcomes(
         params,
     ).fetchone()[0]
     rows = conn.execute(
-        "SELECT r.id AS review_id, r.fact_id, r.reviewer, r.outcome, r.note, r.at, "
-        "f.subject, f.subject_kind, f.action, f.object, f.object_kind "
+        "SELECT r.id AS review_id, r.fact_id, r.reviewer, r.outcome, r.note, r.at, f.created_by, "
+        "f.subject, f.subject_kind, f.action, f.object, f.object_kind, "
+        f"(f.created_by = ? OR f.public = 1 OR f.id IN ({_OPEN_GRANTS})) AS readable "
         f"FROM reviews r JOIN facts f ON f.id = r.fact_id WHERE {clause} "  # nosec B608
         "ORDER BY r.at DESC, r.id DESC LIMIT ? OFFSET ?",
-        [*params, size, skip],
+        [actor, actor, *params, size, skip],
     ).fetchall()
-    outcomes = [
-        {
+    outcomes = []
+    for row in rows:
+        mine = row["created_by"] == actor
+        entry: dict[str, Any] = {
             "review_id": row["review_id"],
             "fact_id": row["fact_id"],
-            "subject_ref": str(Ref(row["subject_kind"], row["subject"])),
-            "action": row["action"],
-            "object_ref": str(Ref(row["object_kind"], row["object"])),
+            "role": "owner" if mine else "reviewer",
             "reviewer": row["reviewer"],
             "outcome": row["outcome"],
             "note": row["note"],
             "at": row["at"],
         }
-        for row in rows
-    ]
+        if row["readable"]:  # a reviewer whose access has ended gets the id, their verdict and nothing else
+            entry |= {
+                "subject_ref": str(Ref(row["subject_kind"], row["subject"])),
+                "action": row["action"],
+                "object_ref": str(Ref(row["object_kind"], row["object"])),
+            }
+        outcomes.append(entry)
     return {**page_info(limit=size, offset=skip, count=len(outcomes), total=total), "outcomes": outcomes}
 
 

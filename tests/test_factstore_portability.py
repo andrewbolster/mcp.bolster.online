@@ -172,12 +172,14 @@ class TestSchemaVersion:
             FactStore(path)
         assert path.read_bytes() == before
 
-    def test_an_older_database_is_refused_with_the_migration_path_named(self, tmp_path):
+    def test_an_older_database_with_no_migration_path_is_refused_with_the_export_route_named(self, tmp_path):
         path = tmp_path / "facts.sqlite3"
         FactStore(path)
-        self.set_version(path, SCHEMA_VERSION - 1)
+        self.set_version(path, 1)  # no step upgrades version 1
+        before = path.read_bytes()
         with pytest.raises(SchemaVersionError, match="older.*export"):
             FactStore(path)
+        assert path.read_bytes() == before
 
     def test_reopening_a_current_database_keeps_its_data(self, tmp_path):
         path = tmp_path / "facts.sqlite3"

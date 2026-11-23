@@ -111,10 +111,15 @@ class TestMarkReviewed:
         assert [f["id"] for f in store.search_facts(BOB, include_negative=True)["facts"]] == [counter["id"]]
         assert store.search_facts(BOB, scope="all", include_negative=True)["count"] == 1
 
-    def test_the_owner_disputing_their_own_fact_only_logs_it(self, store, fact):
-        result = store.mark_reviewed(ADA, fact["id"], "disputed")
-        assert result["counter_fact"] is None
+    def test_the_owner_cannot_dispute_their_own_fact(self, store, fact):
+        with pytest.raises(ValidationError, match="update_fact"):
+            store.mark_reviewed(ADA, fact["id"], "disputed")
+        # nothing was logged, no counter-fact appeared, and the fact is untouched
+        assert store.get_fact(ADA, fact["id"])["reviews"] == []
         assert store.search_facts(ADA, include_negative=True)["count"] == 1
+        # the owner can still confirm, or say they are unsure
+        assert store.mark_reviewed(ADA, fact["id"], "unsure")["review"]["outcome"] == "unsure"
+        assert store.mark_reviewed(ADA, fact["id"], "confirmed")["fact"]["reviewed_by"] == ADA
 
     def test_unsure_only_logs_and_does_not_stamp(self, store, fact):
         result = store.mark_reviewed(ADA, fact["id"], "unsure")

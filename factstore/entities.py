@@ -140,7 +140,7 @@ def self_binding(conn: sqlite3.Connection, cfg: Config, actor: str) -> sqlite3.R
     return conn.execute(
         f"SELECT * FROM facts WHERE created_by = ? AND subject_kind = ? AND subject_f = ? AND action_f = ? "  # nosec B608
         f"AND confidence > 0 AND {_VALID_NOW} ORDER BY rowid DESC LIMIT 1",
-        [actor, cfg.actor_kind, actor, fold(cfg.alias_action), now, now],
+        [actor, cfg.actor_kind, fold(actor), fold(cfg.alias_action), now, now],
     ).fetchone()
 
 
