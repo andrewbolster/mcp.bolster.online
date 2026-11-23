@@ -236,9 +236,12 @@ def register_fact_tools(server: FastMCP) -> None:
         name: Annotated[str, "The entity to describe, e.g. 'Ada Example' or 'me'"],
         scope: Annotated[Scope, "'mine' (default), 'public' or 'all', as for search_facts"] = "mine",
     ) -> dict[str, Any]:
-        """Describe an entity: canonical name (and `ref`, the same with its kind prefix), aliases, types (from 'Is a'
-        facts, direct and inherited), how many visible facts mention it as subject and as object, and when any of
-        them was last reviewed. `exists` is false for a name no visible fact mentions at all.
+        """Describe an entity: canonical name, `kind` and `ref` (the name as it is written in the facts, with its
+        kind prefix), aliases, types (from 'Is a' facts, direct and inherited), how many visible facts mention it
+        as subject and as object, and when any of them was last reviewed. `exists` is true only for a real entity:
+        it is false for a name no visible fact mentions, and for one that only ever appears as a value such as
+        'text:Quarterly' (`mentioned_as_value_in` counts those uses). A name stored under several kinds is not
+        guessed: it comes back as typed with a warning listing the kinds.
 
         Example: name='me'.
         """
@@ -364,15 +367,23 @@ def register_fact_tools(server: FastMCP) -> None:
             Literal["oldest_reviewed", "lowest_confidence", "newest"],
             "'oldest_reviewed' (default), 'lowest_confidence' (then oldest), or 'newest' (by creation)",
         ] = "oldest_reviewed",
+        reviewed: Annotated[
+            bool | None, "true: only facts that have been reviewed before; false: only facts never reviewed"
+        ] = None,
+        include_never_reviewed: Annotated[
+            bool, "false: skip never-reviewed facts, so only facts whose last review is old are listed (default true)"
+        ] = True,
     ) -> dict[str, Any]:
         """Your own facts that have not been reviewed since `before`.
 
         Returns {before, order, count, total, offset, limit, truncated, facts}. A fact that was never reviewed counts
-        as reviewed when it was created. Example: before='2026-01-01', action='Has geography', order='newest'.
+        as reviewed when it was created, unless include_never_reviewed is false. Example: before='2026-01-01',
+        action='Has geography', order='newest'; reviewed=false lists only facts nobody has reviewed yet.
         """
         return await _run(
             get_store().due_for_review,
             _login(), before, limit,
             offset=offset, action=action, subject=subject, object_kind=object_kind,
-            created_before=created_before, order=order,
+            created_before=created_before, order=order, reviewed=reviewed,
+            include_never_reviewed=include_never_reviewed,
         )  # fmt: skip

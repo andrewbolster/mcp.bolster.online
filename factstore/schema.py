@@ -10,12 +10,13 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 
 from .errors import DatabaseBusyError, SchemaVersionError
-from .values import extras_text, fold
+from .values import extras_text, fold, fold_accents
 
-#: The schema this code writes. Version 3 matches names accent-insensitively (the ``*_f`` columns hold
-#: ``values.fold`` of the name); the table layout is the same as version 2. A change to the tables or indexes needs
-#: a new version and a ``MIGRATIONS`` step: an up-to-date database is opened without running the DDL below.
-SCHEMA_VERSION = 3
+#: The schema this code writes. The ``*_f`` columns hold ``values.fold`` of the name: version 3 folded case, spacing
+#: and accents; version 4 also ignores punctuation (see ``values.fold``). The table layout is the same as version 2.
+#: A change to the tables, indexes or the fold needs a new version and a ``MIGRATIONS`` step: an up-to-date database
+#: is opened without running the DDL below.
+SCHEMA_VERSION = 4
 
 #: How long one statement waits for another process's lock (set on every connection before it runs anything).
 BUSY_TIMEOUT_SECONDS = 30.0
@@ -112,20 +113,29 @@ def _stored_version(conn: sqlite3.Connection) -> int | None:
     return rows[0][0] if rows else None
 
 
-def _refold_names(conn: sqlite3.Connection) -> None:
-    """Version 2 -> 3: recompute the folded name columns with the accent-insensitive ``fold``."""
-    rows = conn.execute("SELECT id, subject, action, object, subject_f, action_f, object_f FROM facts").fetchall()
-    changed = []
-    for row in rows:
-        folded = (fold(row["subject"]), fold(row["action"]), fold(row["object"]))
-        if folded != (row["subject_f"], row["action_f"], row["object_f"]):
-            changed.append((*folded, row["id"]))
-    conn.executemany("UPDATE facts SET subject_f = ?, action_f = ?, object_f = ? WHERE id = ?", changed)
+def _refold(folder: Callable[[str], str]) -> Callable[[sqlite3.Connection], None]:
+    """A migration step that recomputes every folded name column with ``folder``.
+
+    It only rewrites the ``*_f`` columns: no fact is merged, moved or deleted. Names that the new fold treats as the
+    same name simply match each other from then on.
+    """
+
+    def step(conn: sqlite3.Connection) -> None:
+        rows = conn.execute("SELECT id, subject, action, object, subject_f, action_f, object_f FROM facts").fetchall()
+        changed = []
+        for row in rows:
+            folded = (folder(row["subject"]), folder(row["action"]), folder(row["object"]))
+            if folded != (row["subject_f"], row["action_f"], row["object_f"]):
+                changed.append((*folded, row["id"]))
+        conn.executemany("UPDATE facts SET subject_f = ?, action_f = ?, object_f = ? WHERE id = ?", changed)
+
+    return step
 
 
 #: Upgrade steps, keyed by the version each one upgrades FROM (to that version + 1). Each runs inside the one
-#: transaction that also bumps ``schema_version``, so a failure leaves the database as it was.
-MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {2: _refold_names}
+#: transaction that also bumps ``schema_version``, so a failure leaves the database as it was. 2 -> 3 makes matching
+#: accent-insensitive; 3 -> 4 makes it punctuation-insensitive.
+MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {2: _refold(fold_accents), 3: _refold(fold)}
 
 
 #: ``SCHEMA`` as separate statements, so they can run inside an explicit transaction (``executescript`` would

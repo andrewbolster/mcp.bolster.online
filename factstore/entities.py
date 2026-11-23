@@ -237,3 +237,35 @@ def types_of(
             (direct if depth == 0 else inherited)[row["object_f"]] = row["object"]
             frontier.append(row["object_f"])
     return list(direct.values()), list(inherited.values())
+
+
+def display_ref(conn: sqlite3.Connection, scope: str, actor: str, ref: Ref) -> tuple[Ref, list[Ref]]:
+    """How ``ref`` is actually written in the facts the scope can see: its stored spelling and kind.
+
+    A typed name ('Labour Market statistics') matches by folded name, so it may be stored as
+    'source:Labour Market Statistics'. This returns the stored form, using the most used spelling, so a caller sees
+    the entity's real name and kind and not an echo of what they typed. A ``ref`` that already has a kind keeps it.
+    A bare name stored under several kinds is NOT guessed: it is returned unchanged with those kinds as the second
+    value, so the caller can say it is ambiguous. A name nothing mentions is returned unchanged.
+    """
+    vis, vparams = visible(scope, actor)
+    rows = conn.execute(
+        "SELECT name, kind, SUM(n) AS n FROM ("  # nosec B608 - fixed fragments, bound values
+        f"SELECT subject AS name, subject_kind AS kind, COUNT(*) AS n FROM facts WHERE {vis} AND subject_f = ? "
+        "GROUP BY subject, subject_kind UNION ALL "
+        f"SELECT object, object_kind, COUNT(*) FROM facts WHERE {vis} AND object_f = ? GROUP BY object, object_kind"
+        ") GROUP BY name, kind ORDER BY n DESC, name",
+        [*vparams, ref.f, *vparams, ref.f],
+    ).fetchall()
+    forms = [Ref(row["kind"], row["name"]) for row in rows]  # most used first
+    if ref.kind is not None:
+        return next((form for form in forms if form.kind == ref.kind), ref), []
+    by_kind: dict[str, Ref] = {}
+    for form in forms:
+        if form.kind is not None:
+            by_kind.setdefault(form.kind, form)
+    if len(by_kind) == 1:
+        return next(iter(by_kind.values())), []
+    if len(by_kind) > 1:
+        return ref, list(by_kind.values())
+    return next((form for form in forms if form.kind is None), ref), []

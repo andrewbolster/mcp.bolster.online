@@ -7,7 +7,17 @@ from typing import IO, Any
 
 from . import portability, reviews
 from .config import Config
-from .entities import Entity, canonical_ref, entity, instances_of, is_self_token, reaches, self_binding, types_of
+from .entities import (
+    Entity,
+    canonical_ref,
+    display_ref,
+    entity,
+    instances_of,
+    is_self_token,
+    reaches,
+    self_binding,
+    types_of,
+)
 from .errors import FactsError, ValidationError
 from .graph import relationships_between
 from .rows import fact_dict, fetch_visible, insert_fact, match_refs, visible
@@ -429,8 +439,13 @@ class FactStore:
     def describe_entity(self, actor: str, name: str, *, scope: str = "mine") -> dict[str, Any]:
         """Canonical name, aliases, types (direct and inherited), fact counts and when it was last reviewed.
 
-        ``exists`` is true when any fact the scope can see mentions the entity (under any of its names, whatever the
-        action or confidence), so an unknown name is distinguishable from a known entity with nothing counted.
+        ``name``, ``kind`` and ``ref`` are the entity as it is written in the facts (a typed 'Labour Market
+        statistics' comes back as ``source:Labour Market Statistics``). A bare name stored under several kinds is not
+        guessed: it is returned as typed, with a warning listing the kinds. ``exists`` is true when any fact the
+        scope can see mentions the entity (under any of its names, whatever the action or confidence) as an entity,
+        so an unknown name is distinguishable from a known entity with nothing counted. A name that only ever
+        appears as a literal value (kinds ``text``, ``date``, ``number``; 'Quarterly') is not an entity: ``exists``
+        is false and ``mentioned_as_value_in`` says how many facts use it as a value.
         """
         who = actor_id(actor)
         cfg = self.config
@@ -450,19 +465,30 @@ class FactStore:
                 f"SELECT MAX(reviewed_at) FROM facts WHERE {vis} AND confidence > 0 AND ({s_clause} OR {o_clause})",  # nosec B608
                 [*vparams, *s_params, *o_params],
             ).fetchone()[0]
+            value_kinds = sorted(cfg.value_kinds)
+            marks = ",".join("?" * len(value_kinds))
             exists = (
                 conn.execute(
-                    f"SELECT 1 FROM facts WHERE {vis} AND ({s_clause} OR {o_clause}) LIMIT 1",  # nosec B608
-                    [*vparams, *s_params, *o_params],
+                    f"SELECT 1 FROM facts WHERE {vis} AND "  # nosec B608 - fixed fragments, bound values
+                    f"(({s_clause} AND (subject_kind IS NULL OR subject_kind NOT IN ({marks}))) "
+                    f"OR ({o_clause} AND (object_kind IS NULL OR object_kind NOT IN ({marks})))) LIMIT 1",
+                    [*vparams, *s_params, *value_kinds, *o_params, *value_kinds],
                 ).fetchone()
                 is not None
             )
+            as_value = conn.execute(
+                f"SELECT COUNT(*) FROM facts WHERE {vis} AND "  # nosec B608 - fixed fragments, bound values
+                f"(({s_clause} AND subject_kind IN ({marks})) OR ({o_clause} AND object_kind IN ({marks})))",
+                [*vparams, *s_params, *value_kinds, *o_params, *value_kinds],
+            ).fetchone()[0]
+            shown, kinds = display_ref(conn, scope, who, ent.canonical)
             direct, inherited = types_of(conn, cfg, who, scope, ent.names)
             described = {
-                "name": ent.canonical.name,
-                "kind": ent.canonical.kind,
-                "ref": str(ent.canonical),
+                "name": shown.name,
+                "kind": shown.kind,
+                "ref": str(shown),
                 "exists": exists,
+                "mentioned_as_value_in": as_value,
                 "aliases": [str(n) for n in ent.names if n.key != ent.canonical.key],
                 "types": direct,
                 "inherited_types": inherited,
@@ -470,7 +496,14 @@ class FactStore:
                 "facts_as_object": counts["object"],
                 "last_reviewed": last,
             }
-        return with_warnings(described, kind_prefix_warnings(cfg, {"name": name}))
+        warnings = kind_prefix_warnings(cfg, {"name": name})
+        if kinds:
+            warnings.append(
+                f"{name!r} is stored under several kinds ({', '.join(str(k) for k in kinds)}); the counts cover all "
+                "of them. Add a kind prefix (for example "
+                f"'{kinds[0].kind}:{name}') to describe one."
+            )
+        return with_warnings(described, warnings)
 
     def relationships_between(
         self, actor: str, a: str, b: str, *, scope: str = "mine", max_depth: int = 1
@@ -515,13 +548,16 @@ class FactStore:
         object_kind: str | None = None,
         created_before: str | None = None,
         order: str = "oldest_reviewed",
+        reviewed: bool | None = None,
+        include_never_reviewed: bool = True,
     ) -> dict[str, Any]:
         who = actor_id(actor)
         with session(self.path) as conn:
             return reviews.due_for_review(
                 conn, self.config, who, before, limit,
                 offset=offset, action=action, subject=subject, object_kind=object_kind,
-                created_before=created_before, order=order,
+                created_before=created_before, order=order, reviewed=reviewed,
+                include_never_reviewed=include_never_reviewed,
             )  # fmt: skip
 
     def review_outcomes(

@@ -1,4 +1,4 @@
-"""Schema v3: a version 2 database upgrades in place, atomically, with a backup, and is never half-migrated."""
+"""Schema v3 and v4: an older database upgrades in place, atomically, with a backup, and is never half-migrated."""
 
 import io
 import json
@@ -71,8 +71,8 @@ def v2(tmp_path):
 
 
 class TestUpgradeInPlace:
-    def test_the_current_schema_version_is_3(self):
-        assert SCHEMA_VERSION == 3 and set(MIGRATIONS) == {2}
+    def test_the_current_schema_version_is_4(self):
+        assert SCHEMA_VERSION == 4 and set(MIGRATIONS) == {2, 3}
 
     def test_opening_a_version_2_database_upgrades_it_and_keeps_every_row(self, v2):
         before = read(v2, "SELECT id, subject, action, object, created_by FROM facts ORDER BY id")
@@ -154,7 +154,9 @@ class TestFailureLeavesTheDatabaseAsItWas:
                 raise RuntimeError("fold failed")
             return real_fold(text)
 
-        monkeypatch.setattr(schema_module, "fold", flaky)
+        # the 3 -> 4 step fails part-way through, AFTER the 2 -> 3 step has already rewritten rows in the same
+        # transaction: both must roll back, leaving the version 2 database exactly as it was
+        monkeypatch.setitem(MIGRATIONS, 3, schema_module._refold(flaky))
         with pytest.raises(RuntimeError, match="fold failed"):
             FactStore(v2)
         assert read(v2, "SELECT version FROM schema_version") == [(2,)]
