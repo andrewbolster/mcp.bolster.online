@@ -1,5 +1,9 @@
 # Changelog
 
+## \[0.3.1\] - 2026-11-23
+
+- fix(facts): defects found by the catalogue experiment (kind disambiguation, dispute polarity, review outcomes, paging) (#82)
+
 ## \[0.3.0\] - 2026-11-22
 
 - feat: generic facts store (factstore engine + MCP adapter), prototype milestone 1 (#80)
