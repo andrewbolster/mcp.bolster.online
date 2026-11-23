@@ -2,13 +2,16 @@
 
 import io
 import json
+import multiprocessing
 import sqlite3
 import threading
+import time
 
 import pytest
 
-from factstore import SCHEMA_VERSION, FactStore, SchemaVersionError
+from factstore import SCHEMA_VERSION, DatabaseBusyError, FactStore, SchemaVersionError
 from factstore import schema as schema_module
+from factstore.__main__ import main as cli_main
 from factstore.schema import MIGRATIONS, SCHEMA
 
 ADA, JOSE = "ada", "josé"
@@ -211,22 +214,179 @@ class TestExportsAcrossVersions:
         }
 
 
+def open_when_released(path, barrier, results):
+    """Runs in a child process: wait for the start barrier, open the store, report what happened."""
+    try:
+        barrier.wait(60)
+        FactStore(path)
+        results.put("ok")
+    except BaseException as error:  # noqa: BLE001 - reported to the parent
+        results.put(f"{type(error).__name__}: {error}")
+
+
+def open_together(path, openers):
+    """Open ``path`` from ``openers`` separate processes released by one barrier, so they all start at once."""
+    ctx = multiprocessing.get_context("spawn")
+    barrier, results = ctx.Barrier(openers), ctx.Queue()
+    processes = [ctx.Process(target=open_when_released, args=(path, barrier, results)) for _ in range(openers)]
+    for process in processes:
+        process.start()
+    outcomes = [results.get(timeout=120) for _ in processes]
+    for process in processes:
+        process.join(timeout=30)
+    return outcomes
+
+
 class TestConcurrentOpeners:
-    def test_two_processes_opening_a_version_2_database_at_once_both_end_up_on_version_3(self, v2):
+    """Opening is safe to repeat and safe to race: the first attempt at converting a database to WAL, or at creating
+    or upgrading it, may be refused by SQLite with 'database is locked' without waiting, so openers retry."""
+
+    OPENERS = 4
+
+    def test_processes_opening_a_version_2_database_together_all_end_up_on_version_3(self, v2):
+        assert open_together(v2, self.OPENERS) == ["ok"] * self.OPENERS
+        assert read(v2, "SELECT version FROM schema_version") == [(SCHEMA_VERSION,)]
+        assert dict(read(v2, "SELECT id, subject_f FROM facts"))["f-alias"] == "zoe"
+        assert read(v2, "SELECT COUNT(*) FROM facts") == [(len(FACTS),)]
+        assert read(v2, "PRAGMA journal_mode") == [("wal",)]
+
+    def test_only_one_backup_is_made_and_it_is_the_database_before_the_upgrade(self, v2):
+        open_together(v2, self.OPENERS)
+        backups = sorted(path.name for path in v2.parent.iterdir() if ".pre-v" in path.name)
+        assert backups == ["facts.sqlite3.pre-v2.bak"]  # no temporary copies left behind either
+        backup = v2.with_name(backups[0])
+        assert read(backup, "SELECT version FROM schema_version") == [(2,)]
+        assert dict(read(backup, "SELECT id, subject_f FROM facts"))["f-alias"] == "zoë"
+        assert read(backup, "SELECT COUNT(*) FROM facts") == [(len(FACTS),)]
+
+    def test_processes_creating_a_new_database_together_all_succeed(self, tmp_path):
+        path = tmp_path / "facts.sqlite3"
+        assert open_together(path, self.OPENERS) == ["ok"] * self.OPENERS
+        assert read(path, "SELECT version FROM schema_version") == [(SCHEMA_VERSION,)]
+        assert read(path, "SELECT COUNT(*) FROM schema_version") == [(1,)]  # recorded once, not once per opener
+        assert read(path, "SELECT COUNT(*) FROM facts") == [(0,)]
+        assert FactStore(path).add_fact(ADA, "A", "Is a", "B")["subject"] == "A"
+
+    def test_processes_opening_a_current_database_together_change_nothing(self, tmp_path):
+        path = tmp_path / "facts.sqlite3"
+        FactStore(path).add_fact(ADA, "A", "Is a", "B")
+        assert open_together(path, self.OPENERS) == ["ok"] * self.OPENERS
+        assert read(path, "SELECT COUNT(*) FROM facts") == [(1,)]
+
+    def test_threads_in_one_process_opening_a_version_2_database_together_all_succeed(self, v2):
         errors: list[BaseException] = []
+        barrier = threading.Barrier(self.OPENERS)
 
         def opener():
             try:
+                barrier.wait(30)
                 FactStore(v2)
             except BaseException as error:  # noqa: BLE001 - reported to the main thread
                 errors.append(error)
 
-        threads = [threading.Thread(target=opener) for _ in range(3)]
+        threads = [threading.Thread(target=opener) for _ in range(self.OPENERS)]
         for thread in threads:
             thread.start()
         for thread in threads:
-            thread.join(timeout=30)
+            thread.join(timeout=60)
         assert errors == []
         assert read(v2, "SELECT version FROM schema_version") == [(SCHEMA_VERSION,)]
-        assert dict(read(v2, "SELECT id, subject_f FROM facts"))["f-alias"] == "zoe"
-        assert read(v2, "SELECT COUNT(*) FROM facts") == [(len(FACTS),)]
+
+
+class TestTheOpenRetriesAndWaits:
+    def test_every_connection_waits_for_locks_from_its_first_statement(self, tmp_path):
+        conn = schema_module.connect(tmp_path / "facts.sqlite3")
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] >= 30_000
+        conn.close()
+
+    def test_a_lock_error_is_retried_and_other_errors_are_not(self, tmp_path, monkeypatch):
+        path = tmp_path / "facts.sqlite3"
+        calls = []
+
+        def locked_twice(_path):
+            calls.append(1)
+            if len(calls) < 3:
+                raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(schema_module, "_open_once", locked_twice)
+        schema_module.initialise(path)
+        assert len(calls) == 3
+
+        calls.clear()
+
+        def table_locked(_path):
+            calls.append(1)
+            if len(calls) < 2:
+                raise sqlite3.OperationalError("database table is locked")
+
+        monkeypatch.setattr(schema_module, "_open_once", table_locked)
+        schema_module.initialise(path)
+        assert len(calls) == 2
+
+        calls.clear()
+
+        def broken(_path):
+            calls.append(1)
+            raise sqlite3.OperationalError("no such table: facts")
+
+        monkeypatch.setattr(schema_module, "_open_once", broken)
+        with pytest.raises(sqlite3.OperationalError, match="no such table"):
+            schema_module.initialise(path)
+        assert len(calls) == 1  # not retried
+
+    def test_a_database_that_stays_locked_gives_a_clear_error_after_the_bound(self, v2, monkeypatch):
+        monkeypatch.setattr(schema_module, "BUSY_TIMEOUT_SECONDS", 0.2)
+        monkeypatch.setattr(schema_module, "OPEN_RETRY_SECONDS", 0.6)
+        holder = sqlite3.connect(v2)
+        holder.execute("PRAGMA journal_mode=WAL")
+        holder.execute("BEGIN IMMEDIATE")  # another process is writing and does not let go
+        try:
+            started = time.monotonic()
+            with pytest.raises(DatabaseBusyError, match="stayed locked.*0.6 s"):
+                FactStore(v2)
+            assert 0.5 <= time.monotonic() - started < 10
+        finally:
+            holder.rollback()
+            holder.close()
+        assert read(v2, "SELECT version FROM schema_version") == [(2,)]  # nothing was changed
+        FactStore(v2)  # and once the lock is released the upgrade goes through
+        assert read(v2, "SELECT version FROM schema_version") == [(SCHEMA_VERSION,)]
+
+    def test_a_current_database_opens_while_another_process_holds_the_write_lock(self, tmp_path, monkeypatch):
+        path = tmp_path / "facts.sqlite3"
+        FactStore(path)
+        monkeypatch.setattr(schema_module, "BUSY_TIMEOUT_SECONDS", 0.2)
+        monkeypatch.setattr(schema_module, "OPEN_RETRY_SECONDS", 0.6)
+        holder = sqlite3.connect(path)
+        holder.execute("BEGIN IMMEDIATE")
+        try:
+            FactStore(path)  # takes no write lock, so it is not held up
+        finally:
+            holder.rollback()
+            holder.close()
+
+    def test_a_newer_database_is_refused_even_while_it_is_locked(self, tmp_path, monkeypatch):
+        path = tmp_path / "facts.sqlite3"
+        FactStore(path)
+        conn = sqlite3.connect(path)
+        with conn:
+            conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION + 1,))
+        monkeypatch.setattr(schema_module, "BUSY_TIMEOUT_SECONDS", 0.2)
+        monkeypatch.setattr(schema_module, "OPEN_RETRY_SECONDS", 0.6)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            with pytest.raises(SchemaVersionError, match="newer"):  # refused without waiting for the lock
+                FactStore(path)
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def test_the_command_line_upgrades_a_version_2_database_and_creates_a_new_one(self, v2, tmp_path, capsys):
+        backup = tmp_path / "backup.jsonl"
+        assert cli_main(["export", "--db", str(v2), "--all", "--out", str(backup)]) == 0
+        assert read(v2, "SELECT version FROM schema_version") == [(SCHEMA_VERSION,)]  # exporting upgraded it
+        fresh = tmp_path / "other" / "facts.sqlite3"
+        assert cli_main(["import", "--db", str(fresh), "--in", str(backup)]) == 0
+        assert read(fresh, "SELECT version FROM schema_version") == [(SCHEMA_VERSION,)]
+        assert read(fresh, "SELECT COUNT(*) FROM facts") == [(len(FACTS),)]
+        assert "exported 5 facts" in capsys.readouterr().err

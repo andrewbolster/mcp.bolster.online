@@ -31,5 +31,9 @@ class NoSelfBindingError(FactsError):
     """'me' was used but the actor has not said which entity they are."""
 
 
+class DatabaseBusyError(FactsError):
+    """The database stayed locked by another process for longer than opening it is allowed to wait."""
+
+
 class SchemaVersionError(FactsError):
     """The database was written by a different schema version than this code understands."""
