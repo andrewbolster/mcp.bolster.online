@@ -69,7 +69,7 @@ Every list reply carries `count` (rows returned), `total` (all matches), `offset
 1. Alias facts are hidden from `search_facts` unless the action is `Alias of`; `describe_entity` lists them.
 1. Only the fact's owner can request a review; a request grants read access to that one fact; anyone who can see a fact (including a public one) can review it.
 1. An owner cannot dispute their own fact (rejected, with a pointer to `update_fact`); `unsure` only logs.
-1. Folding strips accents by Unicode compatibility decomposition (so `ß` is `ss`, `ﬁ` is `fi`). Two names that differ only by accents are the same entity, and upgrading a database merges any that existed separately.
+1. Folding strips accents by Unicode compatibility decomposition (so `ß` is `ss`, `ﬁ` is `fi` and `…` is `...`). Two names that differ only by accents are the same entity, and upgrading a database merges any that existed separately.
 1. A reviewer's `review_outcomes` entry shows the fact's wording only while the reviewer can still read the fact.
 1. `describe_entity` counts exclude alias facts and facts with confidence 0 or below; `exists` does not.
 1. `relationships_between` matches intermediaries by folded name, ignores alias and non-positive facts, and caps depth at 2, direct facts at 200 and paths at 100 (reporting when it cuts off).
