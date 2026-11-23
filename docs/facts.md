@@ -31,7 +31,7 @@ Values such as dates are objects with a kind: "my birthday is 17 May 1988" is (`
 ## Names, aliases and "me"
 
 - An alias is the fact (`bolster`, `Alias of`, `person:Ada Example`). Names are canonicalised when written, and a queried name matches every alias of its entity, so facts written before the alias existed are still found. Chains are followed ten hops; cycles and self-aliases are refused.
-- A name that resolves to more than one entity is an error listing the candidates. Nothing is guessed.
+- A name that resolves to more than one entity is an error listing the candidates (with their kind prefixes). A kind prefix on the name (`org:PPS`) or a `subject_kind`/`object_kind` filter picks the candidate of that kind; if that still leaves several, or none, it is an error again. Nothing is guessed.
 - `me` and `self` mean the calling actor's entity, bound with `set_self` as the alias fact (`actor:<login>`, `Alias of`, entity). Only the actor can write their own `actor:` name.
 - Matching is by folded name and kind. A name without a kind matches any kind, and a stored name without a kind matches any queried kind.
 - Values (`date:`, `number:`, `text:`) are never alias-resolved.
@@ -40,7 +40,13 @@ Values such as dates are objects with a kind: "my birthday is 17 May 1988" is (`
 
 One rule decides what an actor can read, for every tool: scope `mine` (created by the actor), `public`, or `all` (both, plus the single facts the actor has been asked to review). Only the creator changes or deletes a fact; someone else's private fact looks exactly like a missing id.
 
-An owner can ask another actor to review a fact. While the request is open, that actor can read that one fact. `mark_reviewed` records `confirmed` (stamps `reviewed_by/at`), `disputed` or `unsure`, and closes the actor's open requests on the fact. A dispute by someone other than the owner creates the reviewer's own private fact with confidence -1 that references the disputed one; the owner's fact is untouched. `due_for_review` lists the actor's facts last reviewed (or, never reviewed, created) before a cutoff, 90 days ago by default; `pending_reviews` lists open requests.
+An owner can ask another actor to review a fact. While the request is open, that actor can read that one fact. `mark_reviewed` records `confirmed` (stamps `reviewed_by/at`), `disputed` or `unsure`, and closes the actor's open requests on the fact. A dispute by someone other than the owner creates the reviewer's own private fact on the same triple with the opposite sign of the disputed fact (-1.0 for a believed fact or one with confidence 0, +1.0 for a falsification) that references the disputed one; the owner's fact is untouched. A reviewer can state a graded dispute with `confidence`, which must have that opposite sign.
+
+Outcomes are visible to the fact's owner: `get_fact` lists `reviews` (reviewer, outcome, note, time; newest first, up to 20) and `review_outcomes` lists recent entries across all of the owner's facts. A reviewer's counter-fact stays private to them, so the owner learns only that a dispute exists. Anyone else sees only their own entries on a fact. `due_for_review` lists the actor's facts last reviewed (or, never reviewed, created) before a cutoff, 90 days ago by default, filtered by `action`, `subject`, `object_kind` or `created_before` and ordered `oldest_reviewed` (default), `lowest_confidence` or `newest`; `pending_reviews` lists open requests.
+
+## Results
+
+Every list reply carries `count` (rows returned), `total` (all matches), `offset`, `limit` and `truncated` (true when more follow), so a cut-off is never silent; `offset` reads the next page. `relationships_between` reports `direct_truncated` and `indirect_truncated`. Facts carry `subject_ref` and `object_ref`, the names with their kind prefix, which can be passed straight back into a query. `describe_entity` has `exists`, which is false for a name no visible fact mentions. `add_fact` lists `untyped` names only when asked (`check_types`), and `add_facts` writes up to 100 facts in one all-or-nothing transaction.
 
 ## Portability
 
@@ -54,8 +60,10 @@ An owner can ask another actor to review a fact. While the request is open, that
 1. Alias facts are hidden from `search_facts` unless the action is `Alias of`; `describe_entity` lists them.
 1. Only the fact's owner can request a review; a request grants read access to that one fact; anyone who can see a fact (including a public one) can review it.
 1. A dispute by the owner only logs it, and `unsure` only logs.
-1. `describe_entity` counts exclude alias facts and facts with confidence 0 or below.
-1. `relationships_between` matches intermediaries by folded name, ignores alias and non-positive facts, and caps depth at 2 and paths at 100.
+1. `describe_entity` counts exclude alias facts and facts with confidence 0 or below; `exists` does not.
+1. `relationships_between` matches intermediaries by folded name, ignores alias and non-positive facts, and caps depth at 2, direct facts at 200 and paths at 100 (reporting when it cuts off).
+1. A reviewer can read their own entries on a fact only while they can still read the fact: a public fact, or a private one while their request is open.
+1. `due_for_review` includes alias facts, like any other fact the actor owns.
 1. Import does not canonicalise names, so a backup restores exactly what was stored.
 1. `factstore` is a placeholder package name.
 

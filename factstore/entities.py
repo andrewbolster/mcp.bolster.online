@@ -44,6 +44,18 @@ def alias_targets(conn: sqlite3.Connection, cfg: Config, actor: str, scope: str,
     return _dedupe([Ref(r["object_kind"], r["object"]) for r in rows])
 
 
+def _ambiguity(ref: Ref, candidates: list[Ref], want_kind: str | None) -> AmbiguousEntityError:
+    """The error for a name that several entities answer to, with advice that matches what would actually work."""
+    kinds = [candidate.kind for candidate in candidates]
+    if want_kind is None and None not in kinds and len(set(kinds)) == len(kinds):
+        hint = f"Add a kind prefix (for example '{kinds[0]}:{ref.name}') to pick one, or use one of those full names."
+    elif want_kind is not None and not any(kind == want_kind for kind in kinds):
+        hint = f"None of them is of kind {want_kind!r}; use one of those full names."
+    else:
+        hint = "Use one of those full names."
+    return AmbiguousEntityError(str(ref), [str(candidate) for candidate in candidates], hint)
+
+
 def resolve(
     conn: sqlite3.Connection,
     cfg: Config,
@@ -53,11 +65,13 @@ def resolve(
     *,
     budget: int | None = None,
     path: frozenset[tuple[str | None, str]] = frozenset(),
+    want_kind: str | None = None,
 ) -> Ref:
     """Follow alias facts to the canonical name. Depth-capped and cycle-safe.
 
-    A name with several alias targets is fine as long as they all lead to the same canonical entity; otherwise it
-    is ambiguous and ``AmbiguousEntityError`` lists the candidates. Nothing is ever guessed.
+    A name with several alias targets is fine as long as they all lead to the same canonical entity. When they do
+    not, ``want_kind`` (the kind given as a prefix or a ``*_kind`` filter) picks the one candidate of that kind;
+    if that still leaves no single candidate, ``AmbiguousEntityError`` lists them. Nothing is ever guessed.
     """
     budget = cfg.max_alias_depth if budget is None else budget
     here = path | {ref.key}
@@ -66,10 +80,14 @@ def resolve(
         return ref
     finals: dict[tuple[str | None, str], Ref] = {}
     for target in targets:
-        final = resolve(conn, cfg, actor, scope, target, budget=budget - 1, path=here)
+        final = resolve(conn, cfg, actor, scope, target, budget=budget - 1, path=here, want_kind=want_kind)
         finals.setdefault(final.key, final)
     if len(finals) > 1:
-        raise AmbiguousEntityError(str(ref), [str(candidate) for candidate in finals.values()])
+        candidates = list(finals.values())
+        of_kind = [candidate for candidate in candidates if want_kind is not None and candidate.kind == want_kind]
+        if len(of_kind) == 1:
+            return of_kind[0]
+        raise _ambiguity(ref, of_kind or candidates, want_kind)
     return next(iter(finals.values()))
 
 
@@ -130,8 +148,20 @@ def is_self_token(cfg: Config, ref: Ref) -> bool:
     return ref.kind is None and ref.f in cfg.self_tokens
 
 
-def canonical_ref(conn: sqlite3.Connection, cfg: Config, actor: str, scope: str, text: str, label: str) -> Ref:
-    """Parse a name and resolve it: 'me' to the actor's own entity, anything else through alias facts."""
+def canonical_ref(
+    conn: sqlite3.Connection,
+    cfg: Config,
+    actor: str,
+    scope: str,
+    text: str,
+    label: str,
+    kind_hint: str | None = None,
+) -> Ref:
+    """Parse a name and resolve it: 'me' to the actor's own entity, anything else through alias facts.
+
+    A kind prefix on the name (or ``kind_hint``, from a ``*_kind`` filter) says what kind of entity is meant, which
+    settles an alias that several entities answer to.
+    """
     ref = parse_ref(label, text, cfg)
     if ref.kind in cfg.value_kinds:  # a date, number or text is a value, not an entity: nothing to resolve
         return ref
@@ -143,11 +173,19 @@ def canonical_ref(conn: sqlite3.Connection, cfg: Config, actor: str, scope: str,
                 "(for example set_self('person:Your Name'))."
             )
         ref = Ref(binding["object_kind"], binding["object"])
-    return resolve(conn, cfg, actor, scope, ref)
+    return resolve(conn, cfg, actor, scope, ref, want_kind=ref.kind or kind_hint)
 
 
-def entity(conn: sqlite3.Connection, cfg: Config, actor: str, scope: str, text: str, label: str = "name") -> Entity:
-    canonical = canonical_ref(conn, cfg, actor, scope, text, label)
+def entity(
+    conn: sqlite3.Connection,
+    cfg: Config,
+    actor: str,
+    scope: str,
+    text: str,
+    label: str = "name",
+    kind_hint: str | None = None,
+) -> Entity:
+    canonical = canonical_ref(conn, cfg, actor, scope, text, label, kind_hint)
     if canonical.kind in cfg.value_kinds:
         return Entity(canonical, [canonical])
     return Entity(canonical, entity_names(conn, cfg, actor, scope, canonical))

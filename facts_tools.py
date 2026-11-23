@@ -68,6 +68,9 @@ def register_fact_tools(server: FastMCP) -> None:
         public: Annotated[bool, "Let every authenticated user read this fact (default false: private)"] = False,
         attributes: Annotated[dict[str, Any] | None, "Optional extra key/value details, up to 4 KB"] = None,
         references: Annotated[list[str] | None, "Sources or links supporting the fact"] = None,
+        check_types: Annotated[
+            bool, "Also list in the reply the entity names that have no 'Is a' fact yet (default false)"
+        ] = False,
     ) -> dict[str, Any]:
         """Remember a fact: (subject, action, object) with optional validity, confidence and attributes.
 
@@ -78,20 +81,40 @@ def register_fact_tools(server: FastMCP) -> None:
         Facts are private unless public=true; only you can change or delete your own.
         Example: subject='me', action='Has birthday', object='date:1988-05-17'.
         Example: subject='me', action='Partner', object='person:Bo Sample', valid_from='2012', valid_to='2015'.
-        The reply lists `untyped` entity names that have no 'Is a' fact yet.
+        With check_types=true the reply lists `untyped` entity names that have no 'Is a' fact yet.
+        The reply carries subject_ref and object_ref: the names with their kind prefix, safe to pass back in.
+        To write many facts at once use add_facts.
         """
         return await _run(
             get_store().add_fact,
             _login(), subject, action, object,
             confidence=confidence, valid_from=valid_from, valid_to=valid_to, public=public,
-            attributes=attributes, references=references,
+            attributes=attributes, references=references, check_types=check_types,
         )  # fmt: skip
+
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
+    async def add_facts(
+        facts: Annotated[
+            list[dict[str, Any]],
+            "Up to 100 facts, each an object with subject, action and object, and optionally confidence, valid_from, "
+            "valid_to, public, attributes and references (the same meaning as in add_fact)",
+        ],
+    ) -> dict[str, Any]:
+        """Write many facts in one transaction: every fact is stored, or none is. Returns {count, ids} in input order.
+
+        Facts are written in order, so a later fact can use an alias added earlier in the same call. A bad fact
+        fails the whole call with an error that names its position ("Item 2: ...").
+        Example: facts=[{"subject": "A. Example", "action": "Alias of", "object": "person:Ada Example"},
+        {"subject": "A. Example", "action": "Likes", "object": "Tea"}].
+        """
+        return await _run(get_store().add_many, _login(), facts)
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_fact(id: Annotated[str, "The fact's id, as returned by add_fact or search_facts"]) -> dict[str, Any]:  # noqa: A002
         """Read one fact by id: yours, a public one, or one you have been asked to review.
 
-        Example: id='0198f6d2-7c3e-7a41-9b0e-2f5d8a1c4e90'.
+        The reply includes `reviews` (newest first): on your own fact, everyone's outcome (reviewer, outcome, note,
+        time); on anyone else's, only your own entries. Example: id='0198f6d2-7c3e-7a41-9b0e-2f5d8a1c4e90'.
         """
         return await _run(get_store().get_fact, _login(), id)
 
@@ -123,9 +146,13 @@ def register_fact_tools(server: FastMCP) -> None:
             str | None, "Only facts last reviewed (or, if never, created) before this time"
         ] = None,
         limit: Annotated[int, "Maximum facts to return (default 50, max 200)"] = CFG.default_limit,
+        offset: Annotated[int, "How many matches to skip, to read the next page (default 0)"] = 0,
     ) -> dict[str, Any]:
-        """Search facts, newest first. Returns {count, facts}. Alias facts are hidden unless action='Alias of'.
+        """Search facts, newest first, one page at a time. Alias facts are hidden unless action='Alias of'.
 
+        Returns {count, total, offset, limit, truncated, facts}: `total` is every match, and `truncated` is true
+        when more follow this page (repeat with offset=offset+count). A kind prefix on a name ('org:PPS') or
+        subject_kind/object_kind settles an alias that several entities answer to.
         Only positive-confidence facts are returned unless include_negative=true.
         Example (a partner's facts): first search subject='me', action='Partner' to find the entity, then
         search subject=<that entity>.
@@ -138,7 +165,7 @@ def register_fact_tools(server: FastMCP) -> None:
             object_kind=object_kind, subject_type=subject_type, object_type=object_type,
             min_confidence=min_confidence, include_negative=include_negative, valid_at=valid_at,
             valid_from=valid_from, valid_to=valid_to, q=q, attribute_key=attribute_key,
-            attribute_value=attribute_value, reviewed_before=reviewed_before, limit=limit,
+            attribute_value=attribute_value, reviewed_before=reviewed_before, limit=limit, offset=offset,
         )  # fmt: skip
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
@@ -187,8 +214,9 @@ def register_fact_tools(server: FastMCP) -> None:
         name: Annotated[str, "The entity to describe, e.g. 'Ada Example' or 'me'"],
         scope: Annotated[Scope, "'mine' (default), 'public' or 'all', as for search_facts"] = "mine",
     ) -> dict[str, Any]:
-        """Describe an entity: canonical name, aliases, types (from 'Is a' facts, direct and inherited), how many
-        visible facts mention it as subject and as object, and when any of them was last reviewed.
+        """Describe an entity: canonical name (and `ref`, the same with its kind prefix), aliases, types (from 'Is a'
+        facts, direct and inherited), how many visible facts mention it as subject and as object, and when any of
+        them was last reviewed. `exists` is false for a name no visible fact mentions at all.
 
         Example: name='me'.
         """
@@ -222,9 +250,11 @@ def register_fact_tools(server: FastMCP) -> None:
         scope: Annotated[Scope, "'mine' (default), 'public' or 'all'"] = "mine",
         max_depth: Annotated[int, "1: facts directly linking them. 2: also paths through one intermediary entity"] = 1,
     ) -> dict[str, Any]:
-        """The facts connecting two entities, in either direction. Returns {a, b, direct, indirect}.
+        """The facts connecting two entities, in either direction.
 
-        Each direct fact carries direction 'a_to_b' or 'b_to_a'. With max_depth=2, `indirect` lists paths a - via - b.
+        Returns {a, b, direct, direct_truncated, indirect, indirect_truncated}. Each direct fact carries direction
+        'a_to_b' or 'b_to_a'. With max_depth=2, `indirect` lists paths a - via - b. The truncated flags are true when
+        more exist than were returned (200 direct facts, 100 paths).
         Example: a='me', b='person:Bo Sample'.
         """
         return await _run(get_store().relationships_between, _login(), a, b, scope=scope, max_depth=max_depth)
@@ -246,23 +276,49 @@ def register_fact_tools(server: FastMCP) -> None:
         id: Annotated[str, "The fact to review (yours, public, or one you were asked to review)"],  # noqa: A002
         outcome: Annotated[Literal["confirmed", "disputed", "unsure"], "Your verdict"],
         note: Annotated[str | None, "Optional comment"] = None,
+        confidence: Annotated[
+            float | None,
+            "Disputes only: how strongly you dispute it, with the opposite sign of the disputed fact "
+            "(default -1.0 for a believed fact, +1.0 for a falsification)",
+        ] = None,
     ) -> dict[str, Any]:
         """Record a review. 'confirmed' stamps the fact as reviewed now. 'disputed' by someone other than the owner
-        creates your own fact with confidence -1 that references the disputed one (the owner's fact is untouched).
+        creates your own private fact on the same triple with the opposite sign of the disputed fact (-1.0 for a
+        believed fact, +1.0 for one already marked false, or the graded `confidence` you state) that references
+        the disputed one; the owner's fact is untouched, and the owner sees only that a dispute exists.
         Any outcome closes your open review requests on the fact.
 
-        Example: id='0198f6d2-…', outcome='confirmed'.
+        Example: id='0198f6d2-…', outcome='confirmed'. Example: outcome='disputed', confidence=-0.4.
         """
-        return await _run(get_store().mark_reviewed, _login(), id, outcome, note)
+        return await _run(get_store().mark_reviewed, _login(), id, outcome, note, confidence)
+
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    async def review_outcomes(
+        since: Annotated[str | None, f"Only entries at or after this time. {WHEN_FORMATS}"] = None,
+        limit: Annotated[int, "Maximum entries to return (default 50, max 200)"] = CFG.default_limit,
+        offset: Annotated[int, "How many entries to skip, to read the next page (default 0)"] = 0,
+    ) -> dict[str, Any]:
+        """Recent reviews (confirmed, disputed, unsure) that people have made on YOUR facts, newest first.
+
+        Returns {count, total, offset, limit, truncated, outcomes}; each entry has the fact (id, subject_ref,
+        action, object_ref), the reviewer, the outcome, the note and the time. A dispute shows as 'disputed': the
+        reviewer's own counter-fact stays private to them. Example: since='2026-01-01'.
+        """
+        return await _run(get_store().review_outcomes, _login(), since, limit, offset)
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def pending_reviews(
         direction: Annotated[
             Literal["received", "sent"], "'received': asked of you (default). 'sent': asked by you"
         ] = "received",
+        limit: Annotated[int, "Maximum requests to return (default 50, max 200)"] = CFG.default_limit,
+        offset: Annotated[int, "How many requests to skip, to read the next page (default 0)"] = 0,
     ) -> dict[str, Any]:
-        """List open review requests, each with its fact. Returns {count, requests}."""
-        return await _run(get_store().pending_reviews, _login(), direction)
+        """List open review requests, oldest first, each with its fact.
+
+        Returns {count, total, offset, limit, truncated, requests}.
+        """
+        return await _run(get_store().pending_reviews, _login(), direction, limit, offset)
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def due_for_review(
@@ -270,9 +326,24 @@ def register_fact_tools(server: FastMCP) -> None:
             str | None, f"Facts last reviewed (or created) before this time; default 90 days ago. {WHEN_FORMATS}"
         ] = None,
         limit: Annotated[int, "Maximum facts to return (default 50, max 200)"] = CFG.default_limit,
+        offset: Annotated[int, "How many facts to skip, to read the next page (default 0)"] = 0,
+        action: Annotated[str | None, "Only facts with this action (case-insensitive, exact)"] = None,
+        subject: Annotated[str | None, "Only facts about this entity (aliases resolved; 'me' works)"] = None,
+        object_kind: Annotated[str | None, "Only facts whose object is of this kind"] = None,
+        created_before: Annotated[str | None, f"Only facts created before this time. {WHEN_FORMATS}"] = None,
+        order: Annotated[
+            Literal["oldest_reviewed", "lowest_confidence", "newest"],
+            "'oldest_reviewed' (default), 'lowest_confidence' (then oldest), or 'newest' (by creation)",
+        ] = "oldest_reviewed",
     ) -> dict[str, Any]:
-        """Your own facts that have not been reviewed since `before`, oldest first. Returns {before, count, facts}.
+        """Your own facts that have not been reviewed since `before`.
 
-        A fact that was never reviewed counts as reviewed when it was created. Example: before='2026-01-01'.
+        Returns {before, order, count, total, offset, limit, truncated, facts}. A fact that was never reviewed counts
+        as reviewed when it was created. Example: before='2026-01-01', action='Has geography', order='newest'.
         """
-        return await _run(get_store().due_for_review, _login(), before, limit)
+        return await _run(
+            get_store().due_for_review,
+            _login(), before, limit,
+            offset=offset, action=action, subject=subject, object_kind=object_kind,
+            created_before=created_before, order=order,
+        )  # fmt: skip

@@ -163,6 +163,25 @@ def parse_ref(label: str, value: Any, cfg: Config) -> Ref:
     return Ref(None, text)
 
 
+def check_offset(value: Any) -> int:
+    """How many matches to skip: a non-negative whole number (None means 0)."""
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValidationError("offset must be a whole number, 0 or more.")
+    return value
+
+
+def page_size(cfg: Config, limit: Any) -> int:
+    """The page size for a list call: ``limit`` clamped to 1..max_limit, or the default when it is 0 or missing."""
+    return max(1, min(int(limit or cfg.default_limit), cfg.max_limit))
+
+
+def page_info(*, limit: int, offset: int, count: int, total: int) -> dict[str, Any]:
+    """The paging fields every list reply carries. ``truncated`` is true when more matches exist after this page."""
+    return {"count": count, "total": total, "offset": offset, "limit": limit, "truncated": offset + count < total}
+
+
 def check_kind(label: str, value: str | None, cfg: Config) -> str | None:
     if value is None:
         return None

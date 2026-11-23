@@ -12,7 +12,7 @@ from typing import IO, Any
 
 from .config import Config
 from .errors import SchemaVersionError, ValidationError
-from .rows import fact_dict, insert_fact
+from .rows import DERIVED_FIELDS, fact_dict, insert_fact
 from .schema import SCHEMA_VERSION
 from .values import (
     actor_id,
@@ -37,7 +37,8 @@ def export_jsonl(conn: sqlite3.Connection, out: IO[str], actor: str | None) -> i
     else:
         facts = conn.execute("SELECT * FROM facts WHERE created_by = ? ORDER BY created_at, rowid", (actor,)).fetchall()
     for row in facts:
-        out.write(json.dumps({"type": "fact", **fact_dict(row)}, ensure_ascii=False) + "\n")
+        stored = {key: value for key, value in fact_dict(row).items() if key not in DERIVED_FIELDS}
+        out.write(json.dumps({"type": "fact", **stored}, ensure_ascii=False) + "\n")
     ids = [row["id"] for row in facts]
     for table, kind in (("reviews", "review"), ("review_requests", "review_request")):
         for start in range(0, len(ids), 500):

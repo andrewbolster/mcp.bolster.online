@@ -17,7 +17,7 @@ tests/
 ├── test_click_mcp.py           # click_mcp against a fake CLI
 ├── test_bolster_integration.py # the real bolster CLI exposed as tools
 ├── test_factstore_*.py         # the fact-store engine, with no MCP involved
-├── test_facts_tools.py         # the fact tools through the in-memory MCP client
+├── test_facts_tools*.py        # the fact tools through the in-memory MCP client
 └── fixtures/fake_cli/          # small Click app used by the click_mcp tests
 deployment/             # nginx / systemd / webhook config (see README)
 docs/facts.md           # Design note for the fact store

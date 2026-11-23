@@ -40,23 +40,35 @@ def relationships_between(
     rows = conn.execute(
         f"SELECT *, CASE WHEN {a_subject} THEN 'a_to_b' ELSE 'b_to_a' END AS direction FROM facts "  # nosec B608
         f"WHERE {vis} AND confidence > 0 AND action_f != ? "
-        f"AND (({a_subject} AND {b_object}) OR ({b_subject} AND {a_object})) ORDER BY created_at, rowid",
-        [*a_sp, *vparams, structural, *a_sp, *b_op, *b_sp, *a_op],
+        f"AND (({a_subject} AND {b_object}) OR ({b_subject} AND {a_object})) ORDER BY created_at, rowid LIMIT ?",
+        [*a_sp, *vparams, structural, *a_sp, *b_op, *b_sp, *a_op, cfg.max_limit + 1],
     ).fetchall()
-    direct = [{**fact_dict(row), "direction": row["direction"]} for row in rows]
+    direct_truncated = len(rows) > cfg.max_limit
+    direct = [{**fact_dict(row), "direction": row["direction"]} for row in rows[: cfg.max_limit]]
 
     indirect: list[dict[str, Any]] = []
+    indirect_truncated = False
     if max_depth >= 2:
-        indirect = _one_hop_paths(
+        indirect, indirect_truncated = _one_hop_paths(
             conn, vis, vparams, structural, {n.f for n in first.names}, {n.f for n in second.names}
         )
-    return {"a": str(first.canonical), "b": str(second.canonical), "direct": direct, "indirect": indirect}
+    return {
+        "a": str(first.canonical),
+        "b": str(second.canonical),
+        "direct": direct,
+        "direct_truncated": direct_truncated,
+        "indirect": indirect,
+        "indirect_truncated": indirect_truncated,
+    }
 
 
 def _one_hop_paths(
     conn: sqlite3.Connection, vis: str, vparams: list[Any], structural: str, starts: set[str], goals: set[str]
-) -> list[dict[str, Any]]:
-    """Paths start - via - goal from a depth-capped recursive walk over facts that never revisits a node."""
+) -> tuple[list[dict[str, Any]], bool]:
+    """Paths start - via - goal from a depth-capped recursive walk over facts that never revisits a node.
+
+    Returns the paths (at most MAX_PATHS) and whether more existed than were returned.
+    """
     edges = (
         f"SELECT id AS fid, subject_f AS src, object_f AS dst FROM facts WHERE {vis} AND confidence > 0 "  # nosec B608
         f"AND action_f != ? UNION ALL "
@@ -74,13 +86,15 @@ def _one_hop_paths(
         )
         SELECT facts, nodes FROM walk WHERE depth = {MAX_DEPTH} AND node IN ({goal_marks}) LIMIT ?
     """  # nosec B608 - fixed fragments, bound values
-    params = [*vparams, structural, *vparams, structural, json.dumps(sorted(starts)), *sorted(goals), MAX_PATHS]
+    params = [*vparams, structural, *vparams, structural, json.dumps(sorted(starts)), *sorted(goals), MAX_PATHS + 1]
     paths: list[dict[str, Any]] = []
-    for row in conn.execute(sql, params).fetchall():
+    rows = conn.execute(sql, params).fetchall()
+    truncated = len(rows) > MAX_PATHS
+    for row in rows[:MAX_PATHS]:
         via = row["nodes"].strip(_SEP).split(_SEP)[1]
         if via in starts or via in goals:  # another name for one of the endpoints, not an intermediary
             continue
         fact_ids = [part for part in row["facts"].split(",") if part]
         facts = [fact_dict(conn.execute("SELECT * FROM facts WHERE id = ?", (fid,)).fetchone()) for fid in fact_ids]
         paths.append({"via": via, "facts": facts})
-    return paths
+    return paths, truncated
