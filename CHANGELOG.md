@@ -1,5 +1,9 @@
 # Changelog
 
+## \[0.3.2\] - 2026-11-23
+
+- fix(facts): defects found by the claims experiment, plus schema v3 with in-place migration (#84)
+
 ## \[0.3.1\] - 2026-11-23
 
 - fix(facts): defects found by the catalogue experiment (kind disambiguation, dispute polarity, review outcomes, paging) (#82)
