@@ -11,9 +11,24 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .config import Config
+from .entities import entity
 from .errors import NotFoundError, PermissionDeniedError, ValidationError
-from .rows import fact_dict, fetch_visible, insert_fact
-from .values import actor_id, iso, now_iso, parse_instant, uuid7
+from .rows import fact_dict, fetch_visible, insert_fact, match_refs
+from .values import (
+    Ref,
+    actor_id,
+    check_confidence,
+    check_kind,
+    check_offset,
+    check_text,
+    fold,
+    iso,
+    now_iso,
+    page_info,
+    page_size,
+    parse_instant,
+    uuid7,
+)
 
 OUTCOMES = ("confirmed", "disputed", "unsure")
 
@@ -59,18 +74,56 @@ def request_review(
     return {**_request_dict(created), "already_open": False}
 
 
+def _counter_confidence(disputed: float, stated: float | None) -> float:
+    """The confidence of a reviewer's counter-fact: the opposite sign of the fact it disputes.
+
+    Disputing a believed fact (confidence above 0) or one with no statement (0) is a falsification (-1.0);
+    disputing a falsification (below 0) asserts it is true (+1.0). A reviewer can state a graded dispute instead,
+    but only with the opposite sign.
+    """
+    wants_positive = disputed < 0
+    if stated is None:
+        return 1.0 if wants_positive else -1.0
+    value = check_confidence(stated)
+    if value == 0 or (value > 0) != wants_positive:
+        raise ValidationError(
+            f"The fact you are disputing has confidence {disputed:g}, so a dispute must state the opposite: "
+            f"a confidence {'above 0 (up to 1.0)' if wants_positive else 'below 0 (down to -1.0)'}; got {stated:g}."
+        )
+    return value
+
+
 def mark_reviewed(
-    conn: sqlite3.Connection, cfg: Config, actor: str, fact_id: str, outcome: str, note: str | None = None
+    conn: sqlite3.Connection,
+    cfg: Config,
+    actor: str,
+    fact_id: str,
+    outcome: str,
+    note: str | None = None,
+    confidence: float | None = None,
 ) -> dict[str, Any]:
     """Record the actor's review of a fact they can see.
 
     ``confirmed`` also stamps the fact's reviewed_by/reviewed_at. ``disputed`` by someone other than the owner
-    creates the reviewer's own confidence -1 fact referencing the disputed one; the owner's fact is untouched.
-    ``unsure`` only logs. Every outcome closes the actor's open requests on the fact.
+    creates the reviewer's own fact on the same triple, with the opposite sign of the disputed fact (-1.0 for a
+    believed fact, +1.0 for a falsification, or the graded ``confidence`` the reviewer states), referencing the
+    disputed one; the owner's fact is untouched. ``unsure`` only logs. Every outcome closes the actor's open
+    requests on the fact.
     """
     if outcome not in OUTCOMES:
         raise ValidationError(f"outcome must be one of {', '.join(OUTCOMES)}.")
     fact = fetch_visible(conn, actor, fact_id, "all")
+    counter_confidence: float | None = None
+    if confidence is not None:
+        if outcome != "disputed":
+            raise ValidationError("confidence applies to a 'disputed' outcome only.")
+        if fact["created_by"] == actor:
+            raise ValidationError(
+                "An owner's dispute of their own fact is only logged; confidence applies to a reviewer's "
+                "counter-fact. Use update_fact to change the fact's confidence."
+            )
+    if outcome == "disputed" and fact["created_by"] != actor:
+        counter_confidence = _counter_confidence(fact["confidence"], confidence)
     review_id, now = str(uuid7()), now_iso()
     clean_note = _note(note, cfg)
     conn.execute(
@@ -85,12 +138,12 @@ def mark_reviewed(
     counter_fact: dict[str, Any] | None = None
     if outcome == "confirmed":
         conn.execute("UPDATE facts SET reviewed_by = ?, reviewed_at = ? WHERE id = ?", (actor, now, fact["id"]))
-    elif outcome == "disputed" and fact["created_by"] != actor:
+    elif counter_confidence is not None:
         copied = ["subject", "subject_f", "subject_kind", "action", "action_f", "object", "object_f", "object_kind"]
         counter = {
             **{key: fact[key] for key in copied},
             "id": str(uuid7()),
-            "confidence": -1.0,
+            "confidence": counter_confidence,
             "public": 0,
             "attributes": json.dumps({"disputes": fact["id"]}),
             "refs": json.dumps([f"fact:{fact['id']}"]),
@@ -107,20 +160,34 @@ def mark_reviewed(
     }
 
 
-def pending_reviews(conn: sqlite3.Connection, cfg: Config, actor: str, direction: str = "received") -> dict[str, Any]:
-    """Open review requests: ``received`` (asked of the actor, with the fact) or ``sent`` (made by the actor)."""
+def pending_reviews(
+    conn: sqlite3.Connection,
+    cfg: Config,
+    actor: str,
+    direction: str = "received",
+    limit: int | None = None,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Open review requests: ``received`` (asked of the actor, with the fact) or ``sent`` (made by the actor).
+
+    Oldest first, one page at a time: the reply says how many requests there are in total and whether more follow.
+    """
     if direction == "received":
-        rows = conn.execute(
-            "SELECT * FROM review_requests WHERE requested_of = ? AND status = 'open' ORDER BY requested_at, id",
-            (actor,),
-        ).fetchall()
+        column = "requested_of"
     elif direction == "sent":
-        rows = conn.execute(
-            "SELECT * FROM review_requests WHERE requested_by = ? AND status = 'open' ORDER BY requested_at, id",
-            (actor,),
-        ).fetchall()
+        column = "requested_by"
     else:
         raise ValidationError("direction must be 'received' or 'sent'.")
+    size, skip = page_size(cfg, limit), check_offset(offset)
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM review_requests WHERE {column} = ? AND status = 'open'",  # nosec B608
+        (actor,),
+    ).fetchone()[0]
+    rows = conn.execute(
+        f"SELECT * FROM review_requests WHERE {column} = ? AND status = 'open' "  # nosec B608
+        "ORDER BY requested_at, id LIMIT ? OFFSET ?",
+        (actor, size, skip),
+    ).fetchall()
     requests = []
     for row in rows:
         try:
@@ -128,24 +195,136 @@ def pending_reviews(conn: sqlite3.Connection, cfg: Config, actor: str, direction
         except NotFoundError:  # only possible for 'sent' on a fact the owner has since deleted
             continue
         requests.append({**_request_dict(row), "fact": fact})
-    return {"count": len(requests), "requests": requests}
+    return {**page_info(limit=size, offset=skip, count=len(rows), total=total), "requests": requests}
+
+
+DUE_ORDERS = ("oldest_reviewed", "lowest_confidence", "newest")
 
 
 def due_for_review(
-    conn: sqlite3.Connection, cfg: Config, actor: str, before: str | None = None, limit: int | None = None
+    conn: sqlite3.Connection,
+    cfg: Config,
+    actor: str,
+    before: str | None = None,
+    limit: int | None = None,
+    *,
+    offset: int = 0,
+    action: str | None = None,
+    subject: str | None = None,
+    object_kind: str | None = None,
+    created_before: str | None = None,
+    order: str = "oldest_reviewed",
 ) -> dict[str, Any]:
-    """The actor's own facts last reviewed (or, never reviewed, created) before ``before``, oldest first."""
+    """The actor's own facts last reviewed (or, never reviewed, created) before ``before``.
+
+    ``action``, ``subject`` (aliases resolved), ``object_kind`` and ``created_before`` narrow the list. ``order`` is
+    ``oldest_reviewed`` (default), ``lowest_confidence`` (then oldest) or ``newest`` (by creation).
+    """
+    if order not in DUE_ORDERS:
+        raise ValidationError(f"order must be one of {', '.join(DUE_ORDERS)}.")
     if before is None:
         cutoff = iso(datetime.now(UTC) - timedelta(days=cfg.review_interval_days))
     else:
         cutoff = iso(parse_instant(before))
-    size = max(1, min(int(limit or cfg.default_limit), cfg.max_limit))
+    where: list[str] = ["created_by = ?", "COALESCE(reviewed_at, created_at) < ?"]
+    params: list[Any] = [actor, cutoff]
+    if action is not None:
+        where.append("action_f = ?")
+        params.append(fold(check_text("action", action, cfg)))
+    if subject is not None:
+        clause, cparams = match_refs("subject", entity(conn, cfg, actor, "mine", subject, "subject").names)
+        where.append(clause)
+        params.extend(cparams)
+    if object_kind is not None:
+        where.append("object_kind = ?")
+        params.append(check_kind("object_kind", object_kind, cfg))
+    if created_before is not None:
+        where.append("created_at < ?")
+        params.append(iso(parse_instant(created_before)))
+    ordering = {
+        "oldest_reviewed": "COALESCE(reviewed_at, created_at), rowid",
+        "lowest_confidence": "confidence, COALESCE(reviewed_at, created_at), rowid",
+        "newest": "created_at DESC, rowid DESC",
+    }[order]
+    size, skip = page_size(cfg, limit), check_offset(offset)
+    clause = " AND ".join(where)
+    total = conn.execute(f"SELECT COUNT(*) FROM facts WHERE {clause}", params).fetchone()[0]  # nosec B608
     rows = conn.execute(
-        "SELECT * FROM facts WHERE created_by = ? AND COALESCE(reviewed_at, created_at) < ? "
-        "ORDER BY COALESCE(reviewed_at, created_at), rowid LIMIT ?",
-        (actor, cutoff, size),
+        f"SELECT * FROM facts WHERE {clause} ORDER BY {ordering} LIMIT ? OFFSET ?",  # nosec B608
+        [*params, size, skip],
     ).fetchall()
-    return {"before": cutoff, "count": len(rows), "facts": [fact_dict(row) for row in rows]}
+    return {
+        "before": cutoff,
+        "order": order,
+        **page_info(limit=size, offset=skip, count=len(rows), total=total),
+        "facts": [fact_dict(row) for row in rows],
+    }
+
+
+def reviews_for(conn: sqlite3.Connection, cfg: Config, actor: str, fact: sqlite3.Row) -> list[dict[str, Any]]:
+    """The review entries on a fact that ``actor`` may see, newest first.
+
+    The fact's owner sees every entry (reviewer, outcome, note, time). Anyone else sees only their own entries, so
+    one reviewer never learns what another said. A dispute's counter-fact is private to its reviewer and is
+    never referenced here.
+    """
+    where, params = ["fact_id = ?"], [fact["id"]]
+    if fact["created_by"] != actor:
+        where.append("reviewer = ?")
+        params.append(actor)
+    rows = conn.execute(
+        f"SELECT reviewer, outcome, note, at FROM reviews WHERE {' AND '.join(where)} "  # nosec B608
+        "ORDER BY at DESC, id DESC LIMIT ?",
+        [*params, cfg.max_reviews_shown],
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def review_outcomes(
+    conn: sqlite3.Connection,
+    cfg: Config,
+    actor: str,
+    since: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Recent review entries on the actor's own facts, newest first, optionally only those at or after ``since``.
+
+    Each entry names the fact it concerns (triple and id), the reviewer, the outcome and the note. A dispute is
+    reported as the outcome 'disputed': the reviewer's counter-fact itself stays private to the reviewer.
+    """
+    where, params = ["f.created_by = ?"], [actor]
+    if since is not None:
+        where.append("r.at >= ?")
+        params.append(iso(parse_instant(since)))
+    clause = " AND ".join(where)
+    size, skip = page_size(cfg, limit), check_offset(offset)
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM reviews r JOIN facts f ON f.id = r.fact_id WHERE {clause}",  # nosec B608
+        params,
+    ).fetchone()[0]
+    rows = conn.execute(
+        "SELECT r.id AS review_id, r.fact_id, r.reviewer, r.outcome, r.note, r.at, "
+        "f.subject, f.subject_kind, f.action, f.object, f.object_kind "
+        f"FROM reviews r JOIN facts f ON f.id = r.fact_id WHERE {clause} "  # nosec B608
+        "ORDER BY r.at DESC, r.id DESC LIMIT ? OFFSET ?",
+        [*params, size, skip],
+    ).fetchall()
+    outcomes = [
+        {
+            "review_id": row["review_id"],
+            "fact_id": row["fact_id"],
+            "subject_ref": str(Ref(row["subject_kind"], row["subject"])),
+            "action": row["action"],
+            "object_ref": str(Ref(row["object_kind"], row["object"])),
+            "reviewer": row["reviewer"],
+            "outcome": row["outcome"],
+            "note": row["note"],
+            "at": row["at"],
+        }
+        for row in rows
+    ]
+    return {**page_info(limit=size, offset=skip, count=len(outcomes), total=total), "outcomes": outcomes}
 
 
 def require_owner(row: sqlite3.Row, actor: str) -> None:

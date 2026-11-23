@@ -26,5 +26,9 @@ class Config:
     max_entity_names: int = 200
     default_limit: int = 50
     max_limit: int = 200
+    #: Most facts ``add_many`` accepts in one call (one transaction).
+    max_batch: int = 100
+    #: Most review entries ``get_fact`` lists for one fact.
+    max_reviews_shown: int = 20
     #: A fact counts as due for review once this many days have passed since it was created or last reviewed.
     review_interval_days: int = 90

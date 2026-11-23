@@ -46,14 +46,22 @@ def match_refs(column: str, refs: Iterable[Ref]) -> tuple[str, list[Any]]:
     return ("(" + " OR ".join(parts) + ")", params) if parts else ("0", [])
 
 
+#: Fields of ``fact_dict`` that are computed from other fields, so a backup does not store them.
+DERIVED_FIELDS = ("subject_ref", "object_ref")
+
+
 def fact_dict(row: sqlite3.Row) -> dict[str, Any]:
+    """A fact as returned to callers. ``subject_ref``/``object_ref`` are the names with their kind prefix, which
+    can be passed straight back into a query and mean exactly the same entity."""
     return {
         "id": row["id"],
         "subject": row["subject"],
         "subject_kind": row["subject_kind"],
+        "subject_ref": str(Ref(row["subject_kind"], row["subject"])),
         "action": row["action"],
         "object": row["object"],
         "object_kind": row["object_kind"],
+        "object_ref": str(Ref(row["object_kind"], row["object"])),
         "confidence": row["confidence"],
         "valid_from": row["valid_from"],
         "valid_to": row["valid_to"],

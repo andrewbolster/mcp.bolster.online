@@ -142,7 +142,7 @@ def test_get_update_delete_review_of_a_private_fact_look_like_a_missing_id(store
 
 
 def test_the_same_names_are_separate_private_names_to_someone_else(store, populated):
-    fact = store.add_fact(BOB, "Zorblax Prime", "Likes", "Tea")
+    fact = store.add_fact(BOB, "Zorblax Prime", "Likes", "Tea", check_types=True)
     assert fact["subject_kind"] is None  # Ada's alias and kind did not resolve for Bob
     assert fact["untyped"] == ["Zorblax Prime", "Tea"]  # Ada's private 'Is a' did not suppress the hint
     assert store.search_facts(BOB, subject="Zorblax Prime")["count"] == 1

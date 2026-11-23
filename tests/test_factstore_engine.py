@@ -52,18 +52,21 @@ class TestAddAndGet:
         with pytest.raises(NotFoundError):
             store.get_fact(ADA, "nope")
 
+    def test_the_untyped_hint_is_off_unless_asked_for(self, store):
+        assert "untyped" not in add(store, action="Partner", object="person:Bo Sample")
+
     def test_untyped_lists_entities_with_no_type_fact(self, store):
-        fact = add(store, action="Partner", object="person:Bo Sample")
+        fact = add(store, action="Partner", object="person:Bo Sample", check_types=True)
         assert fact["untyped"] == ["Ada Example", "person:Bo Sample"]
         store.add_fact(ADA, "Ada Example", "Is a", "person:Person")
-        again = add(store, action="Partner", object="person:Bo Sample")
+        again = add(store, action="Partner", object="person:Bo Sample", check_types=True)
         assert again["untyped"] == ["person:Bo Sample"]
 
     def test_values_are_never_untyped(self, store):
-        assert add(store)["untyped"] == ["Ada Example"]
+        assert add(store, check_types=True)["untyped"] == ["Ada Example"]
 
     def test_type_facts_get_no_untyped_hint(self, store):
-        assert "untyped" not in store.add_fact(ADA, "Ada Example", "Is a", "Person")
+        assert "untyped" not in store.add_fact(ADA, "Ada Example", "Is a", "Person", check_types=True)
 
 
 class TestConfidence:

@@ -20,11 +20,11 @@ class PermissionDeniedError(FactsError):
 class AmbiguousEntityError(FactsError):
     """A name resolves to more than one entity. Carries the candidates so the caller can choose."""
 
-    def __init__(self, name: str, candidates: list[str]):
+    def __init__(self, name: str, candidates: list[str], hint: str | None = None):
         self.name = name
         self.candidates = candidates
         listed = ", ".join(repr(c) for c in candidates)
-        super().__init__(f"{name!r} is ambiguous: it resolves to {listed}. Use one of those names (or a kind prefix).")
+        super().__init__(f"{name!r} is ambiguous: it resolves to {listed}. {hint or 'Use one of those full names.'}")
 
 
 class NoSelfBindingError(FactsError):

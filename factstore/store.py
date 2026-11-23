@@ -8,7 +8,7 @@ from typing import IO, Any
 from . import portability, reviews
 from .config import Config
 from .entities import Entity, canonical_ref, entity, instances_of, is_self_token, reaches, self_binding, types_of
-from .errors import ValidationError
+from .errors import FactsError, ValidationError
 from .graph import relationships_between
 from .rows import fact_dict, fetch_visible, insert_fact, match_refs, visible
 from .schema import initialise, session
@@ -19,12 +19,15 @@ from .values import (
     check_attributes,
     check_confidence,
     check_kind,
+    check_offset,
     check_references,
     check_text,
     fold,
     iso,
     like,
     now_iso,
+    page_info,
+    page_size,
     parse_instant,
     parse_ref,
     parse_when,
@@ -63,26 +66,96 @@ class FactStore:
         public: bool = False,
         attributes: dict[str, Any] | None = None,
         references: list[str] | None = None,
+        check_types: bool = False,
     ) -> dict[str, Any]:
-        """Store a fact. Names are resolved through alias facts (and 'me') so each entity has one stored name."""
+        """Store a fact. Names are resolved through alias facts (and 'me') so each entity has one stored name.
+
+        With ``check_types`` the reply also lists, under ``untyped``, the entity names that have no type fact yet.
+        """
+        who = actor_id(actor)
+        with session(self.path) as conn:
+            return self._add(
+                conn, who, subject, action, object, confidence, valid_from, valid_to, public, attributes, references,
+                check_types,
+            )  # fmt: skip
+
+    def add_many(self, actor: str, facts: list[dict[str, Any]]) -> dict[str, Any]:
+        """Store up to ``Config.max_batch`` facts in one transaction: all of them are written, or none are.
+
+        Each item is a dict with ``subject``, ``action`` and ``object`` and optionally ``confidence``,
+        ``valid_from``, ``valid_to``, ``public``, ``attributes`` and ``references``. Items are written in order and
+        later items can use aliases created by earlier ones. Returns ``{count, ids}`` with the ids in item order
+        (an alias that already existed reports the existing fact's id). A bad item fails the whole batch with an
+        error that names its position.
+        """
         who = actor_id(actor)
         cfg = self.config
-        with session(self.path) as conn:
-            action_text = check_text("action", action, cfg)
-            alias = fold(action_text) == fold(cfg.alias_action)
-            s_ref, o_ref = self._resolve_names(conn, who, subject, action_text, object)
-            if alias:
-                found = self._existing_alias(conn, who, s_ref, o_ref)
-                if found is not None:
-                    return {**fact_dict(found), "already_exists": True}
-            record = self._record(
-                who, s_ref, action_text, o_ref, confidence, valid_from, valid_to, public, attributes, references
+        if not isinstance(facts, list) or not facts:
+            raise ValidationError("facts must be a non-empty list of fact objects.")
+        if len(facts) > cfg.max_batch:
+            raise ValidationError(
+                f"A batch holds at most {cfg.max_batch} facts; got {len(facts)}. Send it in several calls."
             )
-            insert_fact(conn, record)
-            stored = fact_dict(fetch_visible(conn, who, record["id"], "mine"))
-            if not alias and fold(action_text) != fold(cfg.type_action):
-                stored["untyped"] = self._untyped(conn, who, [s_ref, o_ref])
-            return stored
+        required, optional = ("subject", "action", "object"), (
+            "confidence", "valid_from", "valid_to", "public", "attributes", "references",
+        )  # fmt: skip
+        for index, item in enumerate(facts):
+            if not isinstance(item, dict):
+                raise ValidationError(f"Item {index}: each fact must be an object.")
+            missing = [name for name in required if name not in item]
+            unknown = sorted(set(item) - set(required) - set(optional))
+            if missing or unknown:
+                raise ValidationError(
+                    f"Item {index}: " + (f"missing {', '.join(missing)}. " if missing else "")
+                    + (f"unknown field(s) {', '.join(unknown)}. " if unknown else "")
+                    + f"Allowed fields: {', '.join((*required, *optional))}."
+                )  # fmt: skip
+        ids: list[str] = []
+        with session(self.path) as conn:  # any exception rolls the whole batch back
+            for index, item in enumerate(facts):
+                try:
+                    stored = self._add(
+                        conn, who, item["subject"], item["action"], item["object"],
+                        item.get("confidence", 1.0), item.get("valid_from"), item.get("valid_to"),
+                        item.get("public", False), item.get("attributes"), item.get("references"), False,
+                    )  # fmt: skip
+                except FactsError as error:
+                    error.args = (f"Item {index}: {error}",)
+                    raise
+                ids.append(stored["id"])
+        return {"count": len(ids), "ids": ids}
+
+    def _add(
+        self,
+        conn: sqlite3.Connection,
+        who: str,
+        subject: str,
+        action: str,
+        obj: str,
+        confidence: float | None,
+        valid_from: str | None,
+        valid_to: str | None,
+        public: bool,
+        attributes: dict[str, Any] | None,
+        references: list[str] | None,
+        check_types: bool,
+    ) -> dict[str, Any]:
+        cfg = self.config
+        action_text = check_text("action", action, cfg)
+        alias = fold(action_text) == fold(cfg.alias_action)
+        s_ref, o_ref = self._resolve_names(conn, who, subject, action_text, obj)
+        if alias:
+            found = self._existing_alias(conn, who, s_ref, o_ref)
+            if found is not None:
+                return {**fact_dict(found), "already_exists": True}
+        record = self._record(
+            who, s_ref, action_text, o_ref, confidence, valid_from, valid_to, public, attributes, references
+        )
+        insert_fact(conn, record)
+        stored = fact_dict(fetch_visible(conn, who, record["id"], "mine"))
+        if check_types and not alias and fold(action_text) != fold(cfg.type_action):
+            stored["untyped"] = self._untyped(conn, who, [s_ref, o_ref])
+        return stored
 
     def update_fact(
         self,
@@ -183,9 +256,12 @@ class FactStore:
     # ----------------------------------------------------------------------------------------- reading
 
     def get_fact(self, actor: str, fact_id: str) -> dict[str, Any]:
+        """One fact the actor can see, with its ``reviews``: all of them for the fact's owner, only the actor's
+        own entries for anyone else."""
         who = actor_id(actor)
         with session(self.path) as conn:
-            return fact_dict(fetch_visible(conn, who, fact_id, "all"))
+            row = fetch_visible(conn, who, fact_id, "all")
+            return {**fact_dict(row), "reviews": reviews.reviews_for(conn, self.config, who, row)}
 
     def search_facts(
         self,
@@ -209,21 +285,25 @@ class FactStore:
         attribute_value: str | None = None,
         reviewed_before: str | None = None,
         limit: int | None = None,
+        offset: int = 0,
     ) -> dict[str, Any]:
-        """Search the facts a scope can see, newest first.
+        """Search the facts a scope can see, newest first, one page at a time.
 
-        Names in ``subject``/``object`` are resolved through aliases, so any alias finds the entity's facts.
-        Only positive-confidence facts are returned unless ``include_negative`` is set.
+        Names in ``subject``/``object`` are resolved through aliases, so any alias finds the entity's facts; a kind
+        prefix (or ``subject_kind``/``object_kind``) settles an alias that several entities answer to. Only
+        positive-confidence facts are returned unless ``include_negative`` is set. The reply carries ``total`` (all
+        matches), ``offset``, ``limit`` and ``truncated`` (true when more matches follow this page).
         """
         who = actor_id(actor)
         cfg = self.config
         vis, vparams = visible(scope, who)
         where, params = [vis], list(vparams)
-        size = max(1, min(int(limit or cfg.default_limit), cfg.max_limit))
+        size, skip = page_size(cfg, limit), check_offset(offset)
         with session(self.path) as conn:
-            for column, text in (("subject", subject), ("object", object)):
+            for column, text, kind in (("subject", subject, subject_kind), ("object", object, object_kind)):
                 if text is not None:
-                    clause, cparams = match_refs(column, entity(conn, cfg, who, scope, text, column).names)
+                    hint = check_kind(f"{column}_kind", kind, cfg)
+                    clause, cparams = match_refs(column, entity(conn, cfg, who, scope, text, column, hint).names)
                     where.append(clause)
                     params.extend(cparams)
             if action is not None:
@@ -277,14 +357,23 @@ class FactStore:
             if reviewed_before is not None:
                 where.append("COALESCE(reviewed_at, created_at) < ?")
                 params.append(iso(parse_instant(reviewed_before)))
+            clause = " AND ".join(where)
+            total = conn.execute(f"SELECT COUNT(*) FROM facts WHERE {clause}", params).fetchone()[0]  # nosec B608
             rows = conn.execute(
-                f"SELECT * FROM facts WHERE {' AND '.join(where)} ORDER BY created_at DESC, rowid DESC LIMIT ?",  # nosec B608
-                [*params, size],
+                f"SELECT * FROM facts WHERE {clause} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",  # nosec B608
+                [*params, size, skip],
             ).fetchall()
-            return {"count": len(rows), "facts": [fact_dict(row) for row in rows]}
+            return {
+                **page_info(limit=size, offset=skip, count=len(rows), total=total),
+                "facts": [fact_dict(row) for row in rows],
+            }
 
     def describe_entity(self, actor: str, name: str, *, scope: str = "mine") -> dict[str, Any]:
-        """Canonical name, aliases, types (direct and inherited), fact counts and when it was last reviewed."""
+        """Canonical name, aliases, types (direct and inherited), fact counts and when it was last reviewed.
+
+        ``exists`` is true when any fact the scope can see mentions the entity (under any of its names, whatever the
+        action or confidence), so an unknown name is distinguishable from a known entity with nothing counted.
+        """
         who = actor_id(actor)
         cfg = self.config
         vis, vparams = visible(scope, who)
@@ -303,10 +392,19 @@ class FactStore:
                 f"SELECT MAX(reviewed_at) FROM facts WHERE {vis} AND confidence > 0 AND ({s_clause} OR {o_clause})",  # nosec B608
                 [*vparams, *s_params, *o_params],
             ).fetchone()[0]
+            exists = (
+                conn.execute(
+                    f"SELECT 1 FROM facts WHERE {vis} AND ({s_clause} OR {o_clause}) LIMIT 1",  # nosec B608
+                    [*vparams, *s_params, *o_params],
+                ).fetchone()
+                is not None
+            )
             direct, inherited = types_of(conn, cfg, who, scope, ent.names)
             return {
                 "name": ent.canonical.name,
                 "kind": ent.canonical.kind,
+                "ref": str(ent.canonical),
+                "exists": exists,
                 "aliases": [str(n) for n in ent.names if n.key != ent.canonical.key],
                 "types": direct,
                 "inherited_types": inherited,
@@ -329,20 +427,50 @@ class FactStore:
         with session(self.path) as conn:
             return reviews.request_review(conn, self.config, who, fact_id, of_actor, note)
 
-    def mark_reviewed(self, actor: str, fact_id: str, outcome: str, note: str | None = None) -> dict[str, Any]:
+    def mark_reviewed(
+        self, actor: str, fact_id: str, outcome: str, note: str | None = None, confidence: float | None = None
+    ) -> dict[str, Any]:
+        """Record a review. A reviewer's dispute creates their own counter-fact with the opposite sign of the
+        disputed one (``confidence`` states a graded dispute, with that opposite sign)."""
         who = actor_id(actor)
         with session(self.path) as conn:
-            return reviews.mark_reviewed(conn, self.config, who, fact_id, outcome, note)
+            return reviews.mark_reviewed(conn, self.config, who, fact_id, outcome, note, confidence)
 
-    def pending_reviews(self, actor: str, direction: str = "received") -> dict[str, Any]:
+    def pending_reviews(
+        self, actor: str, direction: str = "received", limit: int | None = None, offset: int = 0
+    ) -> dict[str, Any]:
         who = actor_id(actor)
         with session(self.path) as conn:
-            return reviews.pending_reviews(conn, self.config, who, direction)
+            return reviews.pending_reviews(conn, self.config, who, direction, limit, offset)
 
-    def due_for_review(self, actor: str, before: str | None = None, limit: int | None = None) -> dict[str, Any]:
+    def due_for_review(
+        self,
+        actor: str,
+        before: str | None = None,
+        limit: int | None = None,
+        *,
+        offset: int = 0,
+        action: str | None = None,
+        subject: str | None = None,
+        object_kind: str | None = None,
+        created_before: str | None = None,
+        order: str = "oldest_reviewed",
+    ) -> dict[str, Any]:
         who = actor_id(actor)
         with session(self.path) as conn:
-            return reviews.due_for_review(conn, self.config, who, before, limit)
+            return reviews.due_for_review(
+                conn, self.config, who, before, limit,
+                offset=offset, action=action, subject=subject, object_kind=object_kind,
+                created_before=created_before, order=order,
+            )  # fmt: skip
+
+    def review_outcomes(
+        self, actor: str, since: str | None = None, limit: int | None = None, offset: int = 0
+    ) -> dict[str, Any]:
+        """Review entries (confirmed, disputed, unsure) that others and you have made on the actor's own facts."""
+        who = actor_id(actor)
+        with session(self.path) as conn:
+            return reviews.review_outcomes(conn, self.config, who, since, limit, offset)
 
     # ----------------------------------------------------------------------------------------- portability
 
