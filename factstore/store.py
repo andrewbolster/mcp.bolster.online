@@ -7,6 +7,7 @@ from typing import IO, Any
 
 from . import portability, reviews
 from .config import Config
+from .dependents import dependents as walk_dependents
 from .entities import (
     Entity,
     canonical_ref,
@@ -20,8 +21,18 @@ from .entities import (
 )
 from .errors import FactsError, ValidationError
 from .graph import relationships_between
+from .queries import (
+    GROUP_KEYS,
+    PICKS,
+    check_choice,
+    date_clauses,
+    order_sql,
+    pick_sql,
+    time_clauses,
+)
 from .rows import fact_dict, fetch_visible, insert_fact, match_refs, visible
 from .schema import initialise, session
+from .shape import COMPACT_FACT_FIELDS, FACT_FIELDS, GROUP_FIELD, check_fields, check_format, shape_rows
 from .values import (
     Ref,
     actor_id,
@@ -311,10 +322,25 @@ class FactStore:
         reviewed: bool | None = None,
         has_period: bool | None = None,
         valid_within: bool = False,
+        created_since: str | None = None,
+        created_before: str | None = None,
+        updated_since: str | None = None,
+        changed_since: str | None = None,
+        object_from: str | None = None,
+        object_to: str | None = None,
+        object_within: bool = False,
+        order_by: str | None = None,
+        order: str | None = None,
+        group_by: str | None = None,
+        pick: str | None = None,
+        pick_by: str | None = None,
+        count_only: bool = False,
+        fields: list[str] | None = None,
+        format: str = "full",  # noqa: A002
         limit: int | None = None,
         offset: int = 0,
     ) -> dict[str, Any]:
-        """Search the facts a scope can see, newest first, one page at a time.
+        """Search the facts a scope can see, newest first by default, one page at a time.
 
         Names in ``subject``/``object`` are resolved through aliases, so any alias finds the entity's facts; a kind
         prefix (or ``subject_kind``/``object_kind``) settles an alias that several entities answer to. Only
@@ -333,9 +359,39 @@ class FactStore:
 
         ``q`` matches every word (any order, ignoring case and accents) in the subject, object, action, attribute
         names and values, and references.
+
+        Time: ``created_since``/``created_before`` filter on when a fact was created, ``updated_since`` on when it
+        was last edited (never-edited facts are left out) and ``changed_since`` on either. ``object_from``/
+        ``object_to`` (inclusive, ``YYYY``, ``YYYY-MM`` or ``YYYY-MM-DD``) keep facts whose object is a date in that
+        window: a coarse date covers its period and overlaps the window, or with ``object_within`` must lie entirely
+        inside it; dates with no year and non-date objects never match. ``order_by`` (created_at, updated_at,
+        confidence, valid_from, valid_to, object; ``group_count`` when grouping) with ``order`` asc/desc sorts the
+        page; facts with no value for it come last.
+
+        Grouping: ``group_by`` (subject, action, object, subject_kind, object_kind) returns one fact per group, chosen
+        by ``pick`` (latest, oldest, highest_confidence; default latest) and, for latest/oldest, ``pick_by``
+        (created_at, object (the date the object holds), valid_from, valid_to), each with ``group_count``. ``total``
+        then counts groups. ``count_only`` returns just the counts: the number of matching facts, and with
+        ``group_by`` the size of each group (largest first).
+
+        Shape: ``fields`` picks the fields returned; ``format='compact'`` returns ``columns`` and ``rows`` (lists)
+        instead of fact dicts, without attributes or references unless named in ``fields``.
         """
         who = actor_id(actor)
         cfg = self.config
+        fmt = check_format(format)
+        group = check_choice("group_by", group_by, GROUP_KEYS)
+        if group is None and (pick is not None or pick_by is not None):
+            raise ValidationError("pick and pick_by need group_by.")
+        picked = check_choice("pick", pick, PICKS) or "latest"
+        pick_name = check_choice("pick_by", pick_by, ("created_at", "object", "valid_from", "valid_to"))
+        if pick_name is not None and picked == "highest_confidence":
+            raise ValidationError("pick_by applies to pick='latest' or 'oldest', not 'highest_confidence'.")
+        if count_only and fields is not None:
+            raise ValidationError("fields does not apply to count_only, which returns only counts.")
+        fact_fields = (*FACT_FIELDS, GROUP_FIELD) if group else FACT_FIELDS
+        chosen = check_fields(fields, fact_fields)
+        ordering, _ = order_sql(order_by, order, grouped=group is not None, rowid="rid" if group else "rowid")
         vis, vparams = visible(scope, who)
         where, params = [vis], list(vparams)
         size, skip = page_size(cfg, limit), check_offset(offset)
@@ -424,17 +480,125 @@ class FactStore:
                 where.append("reviewed_at IS NOT NULL")
             elif reviewed is False:
                 where.append("reviewed_at IS NULL")
+            for extra_where, extra_params in (
+                time_clauses(
+                    created_since=created_since,
+                    created_before=created_before,
+                    updated_since=updated_since,
+                    changed_since=changed_since,
+                ),
+                date_clauses(object_from, object_to, object_within),
+            ):
+                where.extend(extra_where)
+                params.extend(extra_params)
             clause = " AND ".join(where)
-            total = conn.execute(f"SELECT COUNT(*) FROM facts WHERE {clause}", params).fetchone()[0]  # nosec B608
-            rows = conn.execute(
-                f"SELECT * FROM facts WHERE {clause} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",  # nosec B608
-                [*params, size, skip],
-            ).fetchall()
-            found = {
-                **page_info(limit=size, offset=skip, count=len(rows), total=total),
-                "facts": [fact_dict(row) for row in rows],
-            }
+            if count_only:
+                if order_by is not None or order is not None:
+                    raise ValidationError("count_only lists groups largest first; order_by and order do not apply.")
+                found = self._counts(conn, clause, params, group, fmt, size, skip)
+            elif group:
+                found = self._grouped(
+                    conn, clause, params, group, picked, pick_name, ordering, chosen, fmt, size, skip
+                )  # fmt: skip
+            else:
+                total = conn.execute(f"SELECT COUNT(*) FROM facts WHERE {clause}", params).fetchone()[0]  # nosec B608
+                rows = conn.execute(
+                    f"SELECT * FROM facts WHERE {clause} ORDER BY {ordering} LIMIT ? OFFSET ?",  # nosec B608 - fixed fragments
+                    [*params, size, skip],
+                ).fetchall()
+                found = {
+                    **page_info(limit=size, offset=skip, count=len(rows), total=total),
+                    **shape_rows(
+                        [fact_dict(row) for row in rows],
+                        key="facts",
+                        fmt=fmt,
+                        fields=chosen,
+                        compact_default=COMPACT_FACT_FIELDS,
+                    ),
+                }
         return with_warnings(found, kind_prefix_warnings(cfg, {"subject": subject, "object": object}))
+
+    def _counts(
+        self,
+        conn: sqlite3.Connection,
+        clause: str,
+        params: list[Any],
+        group: str | None,
+        fmt: str,
+        size: int,
+        skip: int,
+    ) -> dict[str, Any]:
+        """``count_only``: how many facts match, and (with ``group_by``) how big each group is, largest first."""
+        facts_total = conn.execute(f"SELECT COUNT(*) FROM facts WHERE {clause}", params).fetchone()[0]  # nosec B608
+        if group is None:
+            return {"total": facts_total}
+        key = GROUP_KEYS[group]
+        groups = conn.execute(
+            f"SELECT COUNT(*) FROM (SELECT 1 FROM facts WHERE {clause} GROUP BY {key})",  # nosec B608 - fixed fragments
+            params,
+        ).fetchone()[0]
+        label = {
+            "subject": "MIN(subject), MIN(subject_kind)",
+            "object": "MIN(object), MIN(object_kind)",
+            "action": "MIN(action), NULL",
+            "subject_kind": "MIN(subject_kind), NULL",
+            "object_kind": "MIN(object_kind), NULL",
+        }[group]
+        rows = conn.execute(
+            f"SELECT {label}, COUNT(*) AS n FROM facts WHERE {clause} GROUP BY {key} "  # nosec B608 - fixed fragments
+            f"ORDER BY n DESC, {key} LIMIT ? OFFSET ?",
+            [*params, size, skip],
+        ).fetchall()
+        names: list[dict[str, Any]] = []
+        for row in rows:
+            name, kind = row[0], row[1]
+            shown = str(Ref(kind, name)) if group in ("subject", "object") else name
+            names.append({"group": shown, "count": row["n"]})
+        shaped = shape_rows(names, key="groups", fmt=fmt, fields=None, compact_default=("group", "count"))
+        return {
+            "facts_total": facts_total,
+            **page_info(limit=size, offset=skip, count=len(rows), total=groups),
+            **shaped,
+        }
+
+    def _grouped(
+        self,
+        conn: sqlite3.Connection,
+        clause: str,
+        params: list[Any],
+        group: str,
+        picked: str,
+        pick_name: str | None,
+        ordering: str,
+        chosen: tuple[str, ...] | None,
+        fmt: str,
+        size: int,
+        skip: int,
+    ) -> dict[str, Any]:
+        """``group_by``: one fact per group (the ``pick``ed one) with ``group_count``; ``total`` counts groups."""
+        key = GROUP_KEYS[group]
+        groups = conn.execute(
+            f"SELECT COUNT(*) FROM (SELECT 1 FROM facts WHERE {clause} GROUP BY {key})",  # nosec B608 - fixed fragments
+            params,
+        ).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM ("  # nosec B608 - fixed fragments, bound values
+            f"SELECT facts.*, rowid AS rid, COUNT(*) OVER (PARTITION BY {key}) AS group_count, "
+            f"ROW_NUMBER() OVER (PARTITION BY {key} ORDER BY {pick_sql(picked, pick_name)}) AS rn "
+            f"FROM facts WHERE {clause}) WHERE rn = 1 ORDER BY {ordering} LIMIT ? OFFSET ?",
+            [*params, size, skip],
+        ).fetchall()
+        facts = [{**fact_dict(row), GROUP_FIELD: row["group_count"]} for row in rows]
+        return {
+            **page_info(limit=size, offset=skip, count=len(rows), total=groups),
+            **shape_rows(
+                facts,
+                key="facts",
+                fmt=fmt,
+                fields=chosen,
+                compact_default=(*COMPACT_FACT_FIELDS, GROUP_FIELD),
+            ),
+        }
 
     def describe_entity(self, actor: str, name: str, *, scope: str = "mine") -> dict[str, Any]:
         """Canonical name, aliases, types (direct and inherited), fact counts and when it was last reviewed.
@@ -506,12 +670,50 @@ class FactStore:
         return with_warnings(described, warnings)
 
     def relationships_between(
-        self, actor: str, a: str, b: str, *, scope: str = "mine", max_depth: int = 1
+        self,
+        actor: str,
+        a: str,
+        b: str,
+        *,
+        scope: str = "mine",
+        max_depth: int = 1,
+        fields: list[str] | None = None,
+        format: str = "full",  # noqa: A002
     ) -> dict[str, Any]:
         who = actor_id(actor)
         with session(self.path) as conn:
-            found = relationships_between(conn, self.config, who, a, b, scope=scope, max_depth=max_depth)
+            found = relationships_between(
+                conn, self.config, who, a, b, scope=scope, max_depth=max_depth, fields=fields, format=format
+            )
         return with_warnings(found, kind_prefix_warnings(self.config, {"a": a, "b": b}))
+
+    def dependents(
+        self,
+        actor: str,
+        name: str,
+        *,
+        via: list[str] | None = None,
+        depth: int = 1,
+        direction: str = "in",
+        scope: str = "mine",
+        include_negative: bool = False,
+        result_kind: str | None = None,
+        fields: list[str] | None = None,
+        format: str = "full",  # noqa: A002
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """The entities connected to ``name`` through chains of visible facts, nearest first (see
+        ``factstore.dependents``): ``direction`` 'in' (default) finds what points at it, such as the claims derived
+        from a dataset, 'out' what it points at, 'both' either way, following only the ``via`` actions when given."""
+        who = actor_id(actor)
+        with session(self.path) as conn:
+            found = walk_dependents(
+                conn, self.config, who, name,
+                via=via, depth=depth, direction=direction, scope=scope, include_negative=include_negative,
+                result_kind=result_kind, fields=fields, format=format, limit=limit, offset=offset,
+            )  # fmt: skip
+        return with_warnings(found, kind_prefix_warnings(self.config, {"name": name}))
 
     # ----------------------------------------------------------------------------------------- reviews
 
@@ -530,11 +732,20 @@ class FactStore:
             return reviews.mark_reviewed(conn, self.config, who, fact_id, outcome, note, confidence)
 
     def pending_reviews(
-        self, actor: str, direction: str = "received", limit: int | None = None, offset: int = 0
+        self,
+        actor: str,
+        direction: str = "received",
+        limit: int | None = None,
+        offset: int = 0,
+        *,
+        fields: list[str] | None = None,
+        format: str = "full",  # noqa: A002
     ) -> dict[str, Any]:
         who = actor_id(actor)
         with session(self.path) as conn:
-            return reviews.pending_reviews(conn, self.config, who, direction, limit, offset)
+            return reviews.pending_reviews(
+                conn, self.config, who, direction, limit, offset, fields=fields, format=format
+            )
 
     def due_for_review(
         self,
@@ -550,6 +761,10 @@ class FactStore:
         order: str = "oldest_reviewed",
         reviewed: bool | None = None,
         include_never_reviewed: bool = True,
+        created_since: str | None = None,
+        updated_since: str | None = None,
+        fields: list[str] | None = None,
+        format: str = "full",  # noqa: A002
     ) -> dict[str, Any]:
         who = actor_id(actor)
         with session(self.path) as conn:
@@ -558,6 +773,7 @@ class FactStore:
                 offset=offset, action=action, subject=subject, object_kind=object_kind,
                 created_before=created_before, order=order, reviewed=reviewed,
                 include_never_reviewed=include_never_reviewed,
+                created_since=created_since, updated_since=updated_since, fields=fields, format=format,
             )  # fmt: skip
 
     def review_outcomes(
@@ -567,6 +783,8 @@ class FactStore:
         limit: int | None = None,
         offset: int = 0,
         role: str = "owner",
+        fields: list[str] | None = None,
+        format: str = "full",  # noqa: A002
     ) -> dict[str, Any]:
         """Review entries (confirmed, disputed, unsure), newest first.
 
@@ -576,7 +794,7 @@ class FactStore:
         """
         who = actor_id(actor)
         with session(self.path) as conn:
-            return reviews.review_outcomes(conn, self.config, who, since, limit, offset, role)
+            return reviews.review_outcomes(conn, self.config, who, since, limit, offset, role, fields, format)
 
     # ----------------------------------------------------------------------------------------- portability
 

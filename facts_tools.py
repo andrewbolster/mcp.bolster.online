@@ -161,6 +161,47 @@ def register_fact_tools(server: FastMCP) -> None:
         reviewed: Annotated[
             bool | None, "true: only facts that have been reviewed; false: only those never reviewed"
         ] = None,
+        created_since: Annotated[str | None, f"Only facts created at or after this time. {WHEN_FORMATS}"] = None,
+        created_before: Annotated[str | None, "Only facts created before this time"] = None,
+        updated_since: Annotated[str | None, "Only facts edited at or after this time (never-edited ones: no)"] = None,
+        changed_since: Annotated[str | None, "Only facts created OR edited at or after this time"] = None,
+        object_from: Annotated[
+            str | None, "Only facts whose object is a date on or after this (YYYY, YYYY-MM or YYYY-MM-DD)"
+        ] = None,
+        object_to: Annotated[str | None, "Only facts whose object is a date on or before this (inclusive)"] = None,
+        object_within: Annotated[
+            bool, "With object_from/object_to: a coarse date (2026) must lie ENTIRELY inside the window"
+        ] = False,
+        order_by: Annotated[
+            Literal["created_at", "updated_at", "confidence", "valid_from", "valid_to", "object", "group_count"] | None,
+            "Sort the page by this (default newest created first); facts with no value come last. "
+            "group_count only with group_by.",
+        ] = None,
+        order: Annotated[Literal["asc", "desc"] | None, "Sort direction (default desc)"] = None,
+        group_by: Annotated[
+            Literal["subject", "action", "object", "subject_kind", "object_kind"] | None,
+            "Return one fact per group, with group_count",
+        ] = None,
+        pick: Annotated[
+            Literal["latest", "oldest", "highest_confidence"] | None,
+            "With group_by: which fact represents each group (default latest)",
+        ] = None,
+        pick_by: Annotated[
+            Literal["created_at", "object", "valid_from", "valid_to"] | None,
+            "With group_by and pick latest/oldest: what to compare (default created_at; object = the date the "
+            "object holds)",
+        ] = None,
+        count_only: Annotated[
+            bool, "Return only counts: the number of matches, and with group_by each group's size (largest first)"
+        ] = False,
+        fields: Annotated[
+            list[str] | None, "Return only these fields (e.g. ['subject_ref','action','object_ref'])"
+        ] = None,
+        format: Annotated[  # noqa: A002
+            Literal["full", "compact"],
+            "'compact' returns columns + rows (lists) without attributes/references unless named in fields: "
+            "several times smaller",
+        ] = "full",
         limit: Annotated[int, "Maximum facts to return (default 50, max 200)"] = CFG.default_limit,
         offset: Annotated[int, "How many matches to skip, to read the next page (default 0)"] = 0,
     ) -> dict[str, Any]:
@@ -174,10 +215,16 @@ def register_fact_tools(server: FastMCP) -> None:
         match too); valid_within=true keeps only facts that fit entirely inside it, and has_period=true drops
         facts with no period. A reply may carry `warnings`, e.g. about a name like 'claim:Foo' whose prefix is not
         a configured kind and so is matched as literal text.
+        To keep replies small, use format='compact' (columns + rows) and/or fields=[...].
+        group_by returns one fact per group (chosen by pick/pick_by) with `group_count`; `total` then counts
+        groups. count_only=true returns just counts ({total}, or with group_by each group's size).
         Example (a partner's facts): first search subject='me', action='Partner' to find the entity, then
         search subject=<that entity>.
         Example (who was my partner in 2013): subject='me', action='Partner', valid_at='2013-05-17'.
         Example (facts that start and end within 2020-2023): valid_from='2020', valid_to='2023', valid_within=true.
+        Example (what changed since 1 Nov): changed_since='2026-11-01', format='compact'.
+        Example (releases published in Nov 2026): action='Published on', object_from='2026-11', object_to='2026-11'.
+        Example (latest period per dataset): action='Refers to', group_by='object', pick='latest', pick_by='valid_to'.
         """
         return await _run(
             get_store().search_facts,
@@ -187,7 +234,11 @@ def register_fact_tools(server: FastMCP) -> None:
             min_confidence=min_confidence, include_negative=include_negative, valid_at=valid_at,
             valid_from=valid_from, valid_to=valid_to, valid_within=valid_within, has_period=has_period, q=q,
             attribute_key=attribute_key, attribute_value=attribute_value, reviewed_before=reviewed_before,
-            include_never_reviewed=include_never_reviewed, reviewed=reviewed, limit=limit, offset=offset,
+            include_never_reviewed=include_never_reviewed, reviewed=reviewed,
+            created_since=created_since, created_before=created_before, updated_since=updated_since,
+            changed_since=changed_since, object_from=object_from, object_to=object_to,
+            object_within=object_within, order_by=order_by, order=order, group_by=group_by, pick=pick,
+            pick_by=pick_by, count_only=count_only, fields=fields, format=format, limit=limit, offset=offset,
         )  # fmt: skip
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
@@ -274,15 +325,75 @@ def register_fact_tools(server: FastMCP) -> None:
         b: Annotated[str, "The second entity"],
         scope: Annotated[Scope, "'mine' (default), 'public' or 'all'"] = "mine",
         max_depth: Annotated[int, "1: facts directly linking them. 2: also paths through one intermediary entity"] = 1,
+        fields: Annotated[
+            list[str] | None, "Return only these fact fields ('direction' applies to direct facts)"
+        ] = None,
+        format: Annotated[  # noqa: A002
+            Literal["full", "compact"], "'compact': tables of lists instead of fact dicts (see the reply notes)"
+        ] = "full",
     ) -> dict[str, Any]:
         """The facts connecting two entities, in either direction.
 
         Returns {a, b, direct, direct_truncated, indirect, indirect_truncated}. Each direct fact carries direction
         'a_to_b' or 'b_to_a'. With max_depth=2, `indirect` lists paths a - via - b. The truncated flags are true when
         more exist than were returned (200 direct facts, 100 paths).
+        With format='compact', `direct` is {columns, rows} and `indirect` is {fact_columns, columns: ['via','facts'],
+        rows}, each path's facts being rows of fact_columns.
         Example: a='me', b='person:Bo Sample'.
         """
-        return await _run(get_store().relationships_between, _login(), a, b, scope=scope, max_depth=max_depth)
+        return await _run(
+            get_store().relationships_between,
+            _login(), a, b,
+            scope=scope, max_depth=max_depth, fields=fields, format=format,
+        )  # fmt: skip
+
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    async def dependents(
+        entity: Annotated[
+            str, "The entity to start from (aliases and 'me' work), e.g. 'source:Labour Market Statistics'"
+        ],
+        via: Annotated[
+            list[str] | None, "Only follow facts with these actions (default: any action except aliases)"
+        ] = None,
+        depth: Annotated[int, "How many hops to follow, 1 to 3 (default 1)"] = 1,
+        direction: Annotated[
+            Literal["in", "out", "both"],
+            "'in' (default): facts pointing AT the entity (what depends on it). 'out': facts starting from it. "
+            "'both': either way.",
+        ] = "in",
+        scope: Annotated[Scope, "'mine' (default), 'public' or 'all'"] = "mine",
+        include_negative: Annotated[bool, "Also follow facts with confidence 0 or below"] = False,
+        result_kind: Annotated[
+            str | None, "Only return entities of this kind (the walk still passes through the others)"
+        ] = None,
+        fields: Annotated[
+            list[str] | None,
+            "Return only these fields: entity, name, kind, depth, via, fact_ids, confidence, valid_from, valid_to, "
+            "attributes, references (the last four describe the last fact on the path)",
+        ] = None,
+        format: Annotated[  # noqa: A002
+            Literal["full", "compact"], "'compact': columns + rows (entity, depth, via, fact_ids unless fields given)"
+        ] = "full",
+        limit: Annotated[int, "Maximum entities to return (default 50, max 200)"] = CFG.default_limit,
+        offset: Annotated[int, "How many entities to skip, to read the next page (default 0)"] = 0,
+    ) -> dict[str, Any]:
+        """The entities connected to an entity by chains of facts, nearest first, each reported once by its shortest
+        path: what depends on a dataset (direction 'in', the default), what a fact points at ('out'), or both.
+
+        Returns {start, direction, depth, via, capped, count, total, offset, limit, truncated, dependents}. Each
+        dependent has its `entity` (with kind prefix), `depth`, the `via` actions along the path and the `fact_ids`
+        it passes through. Values (dates, numbers, text) are not entities and are never returned. `capped` is true
+        if the walk stopped at 1000 entities. After the first hop entities are matched by their stored name and kind.
+        Example (claims derived from a dataset): entity='source:Labour Market Statistics', via=['Derived from'].
+        Example (claims affected by an event): entity='event:<name>', via=['Affects','Derived from'], depth=2,
+        direction='both', result_kind='claim'.
+        """
+        return await _run(
+            get_store().dependents,
+            _login(), entity,
+            via=via, depth=depth, direction=direction, scope=scope, include_negative=include_negative,
+            result_kind=result_kind, fields=fields, format=format, limit=limit, offset=offset,
+        )  # fmt: skip
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     async def request_review(
@@ -327,6 +438,14 @@ def register_fact_tools(server: FastMCP) -> None:
             "'owner' (default): what people said about YOUR facts. 'reviewer': the reviews YOU wrote on any fact, "
             "confirmed ones included. 'all': both.",
         ] = "owner",
+        fields: Annotated[
+            list[str] | None,
+            "Return only these fields: review_id, fact_id, role, reviewer, outcome, note, at, subject_ref, action, "
+            "object_ref",
+        ] = None,
+        format: Annotated[  # noqa: A002
+            Literal["full", "compact"], "'compact': columns + rows, without review_id and note unless named in fields"
+        ] = "full",
     ) -> dict[str, Any]:
         """Recent reviews (confirmed, disputed, unsure), newest first.
 
@@ -336,7 +455,7 @@ def register_fact_tools(server: FastMCP) -> None:
         'disputed': the reviewer's own counter-fact stays private to them.
         Example: since='2026-01-01'. Example: role='reviewer' to list what you reviewed.
         """
-        return await _run(get_store().review_outcomes, _login(), since, limit, offset, role)
+        return await _run(get_store().review_outcomes, _login(), since, limit, offset, role, fields, format)
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def pending_reviews(
@@ -345,12 +464,21 @@ def register_fact_tools(server: FastMCP) -> None:
         ] = "received",
         limit: Annotated[int, "Maximum requests to return (default 50, max 200)"] = CFG.default_limit,
         offset: Annotated[int, "How many requests to skip, to read the next page (default 0)"] = 0,
+        fields: Annotated[
+            list[str] | None,
+            "Return only these fields, flattening request and fact into one row: id, fact_id, requested_by, "
+            "requested_of, note, requested_at, status, resolved_at, subject_ref, action, object_ref, confidence, "
+            "valid_from, valid_to",
+        ] = None,
+        format: Annotated[  # noqa: A002
+            Literal["full", "compact"], "'compact': columns + rows, one flat row per request"
+        ] = "full",
     ) -> dict[str, Any]:
         """List open review requests, oldest first, each with its fact.
 
         Returns {count, total, offset, limit, truncated, requests}.
         """
-        return await _run(get_store().pending_reviews, _login(), direction, limit, offset)
+        return await _run(get_store().pending_reviews, _login(), direction, limit, offset, fields=fields, format=format)
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def due_for_review(
@@ -373,6 +501,12 @@ def register_fact_tools(server: FastMCP) -> None:
         include_never_reviewed: Annotated[
             bool, "false: skip never-reviewed facts, so only facts whose last review is old are listed (default true)"
         ] = True,
+        created_since: Annotated[str | None, f"Only facts created at or after this time. {WHEN_FORMATS}"] = None,
+        updated_since: Annotated[str | None, "Only facts edited at or after this time"] = None,
+        fields: Annotated[list[str] | None, "Return only these fact fields"] = None,
+        format: Annotated[  # noqa: A002
+            Literal["full", "compact"], "'compact': columns + rows without attributes/references"
+        ] = "full",
     ) -> dict[str, Any]:
         """Your own facts that have not been reviewed since `before`.
 
@@ -386,4 +520,5 @@ def register_fact_tools(server: FastMCP) -> None:
             offset=offset, action=action, subject=subject, object_kind=object_kind,
             created_before=created_before, order=order, reviewed=reviewed,
             include_never_reviewed=include_never_reviewed,
+            created_since=created_since, updated_since=updated_since, fields=fields, format=format,
         )  # fmt: skip

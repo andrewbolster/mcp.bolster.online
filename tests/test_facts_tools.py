@@ -15,7 +15,7 @@ from app import mcp, mcp_auth
 FACT_TOOLS = {
     "add_fact", "get_fact", "search_facts", "update_fact", "delete_fact", "describe_entity", "add_alias", "set_self",
     "relationships_between", "request_review", "mark_reviewed", "pending_reviews", "due_for_review",
-    "add_facts", "review_outcomes",
+    "add_facts", "review_outcomes", "dependents",
 }  # fmt: skip
 READ_ONLY = {
     "get_fact",
@@ -25,6 +25,7 @@ READ_ONLY = {
     "pending_reviews",
     "due_for_review",
     "review_outcomes",
+    "dependents",
 }
 
 

@@ -8,24 +8,41 @@ from .config import Config
 from .entities import entity
 from .errors import ValidationError
 from .rows import fact_dict, match_refs, visible
+from .shape import COMPACT_FACT_FIELDS, FACT_FIELDS, check_fields, check_format
 from .values import fold
 
 MAX_DEPTH = 2
 MAX_PATHS = 100
 _SEP = "\x1f"
+#: Fields a direct fact of ``relationships_between`` can be trimmed to: a fact's, plus which way it points.
+DIRECT_FIELDS = (*FACT_FIELDS, "direction")
 
 
 def relationships_between(
-    conn: sqlite3.Connection, cfg: Config, actor: str, a: str, b: str, *, scope: str = "mine", max_depth: int = 1
+    conn: sqlite3.Connection,
+    cfg: Config,
+    actor: str,
+    a: str,
+    b: str,
+    *,
+    scope: str = "mine",
+    max_depth: int = 1,
+    fields: list[str] | None = None,
+    format: str = "full",  # noqa: A002
 ) -> dict[str, Any]:
     """Facts linking entity ``a`` and entity ``b`` in either direction, aliases resolved on both sides.
 
     ``max_depth`` 1 returns direct facts. ``max_depth`` 2 also returns paths through exactly one intermediary
     entity (a to x to b, each hop in either direction). Only positive-confidence facts count, alias facts are
     structure rather than relationships, and the walk never revisits a node.
+
+    ``fields`` trims every fact to those fields (``direction`` applies to direct facts only). ``format='compact'``
+    returns ``direct`` as ``{columns, rows}`` and ``indirect`` as ``{fact_columns, columns: [via, facts], rows}``
+    where each path's ``facts`` are rows of ``fact_columns``.
     """
     if not isinstance(max_depth, int) or isinstance(max_depth, bool) or not 1 <= max_depth <= MAX_DEPTH:
         raise ValidationError(f"max_depth must be 1 to {MAX_DEPTH}.")
+    fmt, chosen = check_format(format), check_fields(fields, DIRECT_FIELDS)
     first = entity(conn, cfg, actor, scope, a, "a")
     second = entity(conn, cfg, actor, scope, b, "b")
     if first.canonical.key == second.canonical.key:
@@ -52,12 +69,30 @@ def relationships_between(
         indirect, indirect_truncated = _one_hop_paths(
             conn, vis, vparams, structural, {n.f for n in first.names}, {n.f for n in second.names}
         )
+    if fmt == "full" and chosen is None:
+        shaped_direct: Any = direct
+        shaped_indirect: Any = indirect
+    else:
+        direct_columns = list(chosen or (*COMPACT_FACT_FIELDS, "direction"))
+        fact_columns = [c for c in (chosen or COMPACT_FACT_FIELDS) if c != "direction"] or list(COMPACT_FACT_FIELDS)
+        if fmt == "compact":
+            shaped_direct = {"columns": direct_columns, "rows": [[r.get(c) for c in direct_columns] for r in direct]}
+            shaped_indirect = {
+                "fact_columns": fact_columns,
+                "columns": ["via", "facts"],
+                "rows": [[p["via"], [[f.get(c) for c in fact_columns] for f in p["facts"]]] for p in indirect],
+            }
+        else:
+            shaped_direct = [{c: r.get(c) for c in direct_columns} for r in direct]
+            shaped_indirect = [
+                {"via": p["via"], "facts": [{c: f.get(c) for c in fact_columns} for f in p["facts"]]} for p in indirect
+            ]
     return {
         "a": str(first.canonical),
         "b": str(second.canonical),
-        "direct": direct,
+        "direct": shaped_direct,
         "direct_truncated": direct_truncated,
-        "indirect": indirect,
+        "indirect": shaped_indirect,
         "indirect_truncated": indirect_truncated,
     }
 
