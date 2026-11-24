@@ -12,6 +12,7 @@ import json
 import pytest
 
 from factstore import FactsError, NotFoundError
+from factstore.shape import FACT_FIELDS
 
 ADA, BOB, CY = "ada", "bob", "cy"
 #: Values that appear only inside Ada's private facts (never in an attacker's input).
@@ -92,12 +93,117 @@ def attempts(store, actor):
                 ),
             ),
         ]
+        calls += _query_ergonomics(store, actor, scope)
     calls += [
         ("pending received", lambda: store.pending_reviews(actor)),
         ("pending sent", lambda: store.pending_reviews(actor, "sent")),
         ("due", lambda: store.due_for_review(actor, before="2100-01-01")),
-    ]
+        ("pending compact", lambda: store.pending_reviews(actor, format="compact")),
+        ("pending flat", lambda: store.pending_reviews(actor, "sent", fields=["fact_id", "subject_ref", "note"])),
+        ("due compact", lambda: store.due_for_review(actor, before="2100-01-01", format="compact")),
+        (
+            "due since",
+            lambda: store.due_for_review(actor, before="2100-01-01", created_since="1999", updated_since="1999"),
+        ),
+        ("outcomes owner", lambda: store.review_outcomes(actor, role="owner", format="compact")),
+    ]  # (a reviewer's own entries are covered by test_a_reviewer_keeps_the_verdict_not_the_wording below)
     return calls
+
+
+def _query_ergonomics(store, actor, scope):
+    """The search and graph features that shape, count, group, order and walk facts, in one scope."""
+    return [
+        (f"compact {scope}", lambda: store.search_facts(actor, scope=scope, include_negative=True, format="compact")),
+        (
+            f"compact all fields {scope}",
+            lambda: store.search_facts(
+                actor, scope=scope, include_negative=True, format="compact", fields=list(FACT_FIELDS)
+            ),
+        ),
+        (f"projected {scope}", lambda: store.search_facts(actor, scope=scope, fields=["id", "subject", "object"])),
+        (
+            f"created_since {scope}",
+            lambda: store.search_facts(actor, scope=scope, created_since="1999", include_negative=True),
+        ),
+        (
+            f"changed_since {scope}",
+            lambda: store.search_facts(actor, scope=scope, changed_since="1999", include_negative=True),
+        ),
+        (f"updated_since {scope}", lambda: store.search_facts(actor, scope=scope, updated_since="1999")),
+        (f"ordered {scope}", lambda: store.search_facts(actor, scope=scope, order_by="confidence", order="asc")),
+        (f"date range {scope}", lambda: store.search_facts(actor, scope=scope, object_from="1900", object_to="2100")),
+        (
+            f"date range within {scope}",
+            lambda: store.search_facts(actor, scope=scope, object_from="1970", object_to="1970", object_within=True),
+        ),
+        *[
+            (
+                f"group by {group} {scope}",
+                lambda g=group: store.search_facts(actor, scope=scope, group_by=g, include_negative=True),
+            )
+            for group in ("subject", "action", "object", "subject_kind", "object_kind")
+        ],
+        (
+            f"group pick object {scope}",
+            lambda: store.search_facts(actor, scope=scope, group_by="subject", pick="oldest", pick_by="object"),
+        ),
+        (
+            f"group pick confidence {scope}",
+            lambda: store.search_facts(
+                actor, scope=scope, group_by="action", pick="highest_confidence", format="compact"
+            ),
+        ),
+        *[
+            (
+                f"counts by {group} {scope}",
+                lambda g=group: store.search_facts(
+                    actor, scope=scope, group_by=g, count_only=True, include_negative=True
+                ),
+            )
+            for group in ("subject", "action", "object", "subject_kind", "object_kind")
+        ],
+        (f"count only {scope}", lambda: store.search_facts(actor, scope=scope, count_only=True, include_negative=True)),
+        *[
+            (
+                f"dependents {start} {direction} {scope}",
+                lambda st=start, d=direction: store.dependents(
+                    actor, st, depth=3, direction=d, scope=scope, include_negative=True
+                ),
+            )
+            for start in ("Zorblax Prime", "Sekret Nickname", "Quxx Sample", "Wibbleton Mayor", "me")
+            for direction in ("in", "out", "both")
+        ],
+        (
+            f"dependents compact {scope}",
+            lambda: store.dependents(
+                actor,
+                "Zorblax Prime",
+                depth=3,
+                direction="both",
+                scope=scope,
+                format="compact",
+                fields=["entity", "attributes", "fact_ids"],
+            ),
+        ),
+        (
+            f"dependents via {scope}",
+            lambda: store.dependents(
+                actor, "Zorblax Prime", via=["Knows", "Partner"], depth=2, direction="both", scope=scope
+            ),
+        ),
+        (
+            f"between compact {scope}",
+            lambda: store.relationships_between(
+                actor, "Zorblax Prime", "Quxx Sample", scope=scope, max_depth=2, format="compact"
+            ),
+        ),
+        (
+            f"between projected {scope}",
+            lambda: store.relationships_between(
+                actor, "Zorblax Prime", "Wibbleton Mayor", scope=scope, max_depth=2, fields=["id", "object"]
+            ),
+        ),
+    ]
 
 
 def outputs(store, actor):
@@ -194,6 +300,24 @@ class TestTheSingleGrantedFact:
         store.mark_reviewed(BOB, granted, "unsure")
         for label, text in outputs(store, BOB):
             assert not leaks(text, populated=populated), label
+
+    def test_a_reviewer_keeps_the_verdict_not_the_wording_in_every_shape(self, store, populated, granted):
+        store.mark_reviewed(BOB, granted, "unsure", "not sure")
+        wanted = ["fact_id", "outcome", "note", "subject_ref", "action", "object_ref"]
+        compact = store.review_outcomes(BOB, role="reviewer", format="compact", fields=wanted)
+        assert compact["rows"] == [[granted, "unsure", "not sure", None, None, None]]
+        projected = store.review_outcomes(BOB, role="all", fields=wanted)
+        assert projected["outcomes"] == [
+            {
+                "fact_id": granted,
+                "outcome": "unsure",
+                "note": "not sure",
+                "subject_ref": None,
+                "action": None,
+                "object_ref": None,
+            }
+        ]
+        assert store.review_outcomes(CY, role="all")["total"] == 0
 
     def test_a_third_actor_never_gets_it(self, store, populated, granted):
         for label, text in outputs(store, CY):

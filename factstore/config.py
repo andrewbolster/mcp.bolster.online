@@ -30,5 +30,7 @@ class Config:
     max_batch: int = 100
     #: Most review entries ``get_fact`` lists for one fact.
     max_reviews_shown: int = 20
+    #: Most entities one ``dependents`` walk collects before it stops and reports ``capped``.
+    max_dependents: int = 1000
     #: A fact counts as due for review once this many days have passed since it was created or last reviewed.
     review_interval_days: int = 90

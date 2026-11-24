@@ -13,7 +13,9 @@ from typing import Any
 from .config import Config
 from .entities import entity
 from .errors import NotFoundError, PermissionDeniedError, ValidationError
+from .queries import time_clauses
 from .rows import fact_dict, fetch_visible, insert_fact, match_refs
+from .shape import COMPACT_FACT_FIELDS, FACT_FIELDS, check_fields, check_format, shape_rows
 from .values import (
     Ref,
     actor_id,
@@ -32,6 +34,29 @@ from .values import (
 
 OUTCOMES = ("confirmed", "disputed", "unsure")
 OUTCOME_ROLES = ("owner", "reviewer", "all")
+
+#: Fields of a review entry (``review_outcomes``), and the columns a compact list has when ``fields`` is not given.
+OUTCOME_FIELDS = (
+    "review_id",
+    "fact_id",
+    "role",
+    "reviewer",
+    "outcome",
+    "note",
+    "at",
+    "subject_ref",
+    "action",
+    "object_ref",
+)
+COMPACT_OUTCOME_FIELDS = ("fact_id", "role", "reviewer", "outcome", "at", "subject_ref", "action", "object_ref")
+#: Fields of an open review request (``pending_reviews``): the request itself, then the fact it is about.
+REQUEST_FACT_FIELDS = ("subject_ref", "action", "object_ref", "confidence", "valid_from", "valid_to")
+REQUEST_FIELDS = (
+    "id", "fact_id", "requested_by", "requested_of", "note", "requested_at", "status", "resolved_at", *REQUEST_FACT_FIELDS,
+)  # fmt: skip
+COMPACT_REQUEST_FIELDS = (
+    "id", "fact_id", "requested_by", "requested_of", "requested_at", "subject_ref", "action", "object_ref",
+)  # fmt: skip
 
 #: Facts an actor may read only because they were asked to review them and the request is still open.
 _OPEN_GRANTS = "SELECT fact_id FROM review_requests WHERE requested_of = ? AND status = 'open'"
@@ -171,10 +196,13 @@ def pending_reviews(
     direction: str = "received",
     limit: int | None = None,
     offset: int = 0,
+    fields: list[str] | None = None,
+    format: str = "full",  # noqa: A002
 ) -> dict[str, Any]:
     """Open review requests: ``received`` (asked of the actor, with the fact) or ``sent`` (made by the actor).
 
     Oldest first, one page at a time: the reply says how many requests there are in total and whether more follow.
+    ``fields`` and ``format='compact'`` flatten each request and the fact it is about into one row.
     """
     if direction == "received":
         column = "requested_of"
@@ -182,6 +210,7 @@ def pending_reviews(
         column = "requested_by"
     else:
         raise ValidationError("direction must be 'received' or 'sent'.")
+    fmt, chosen = check_format(format), check_fields(fields, REQUEST_FIELDS)
     size, skip = page_size(cfg, limit), check_offset(offset)
     total = conn.execute(
         f"SELECT COUNT(*) FROM review_requests WHERE {column} = ? AND status = 'open'",  # nosec B608
@@ -198,8 +227,12 @@ def pending_reviews(
             fact = fact_dict(fetch_visible(conn, actor, row["fact_id"], "all"))
         except NotFoundError:  # only possible for 'sent' on a fact the owner has since deleted
             continue
-        requests.append({**_request_dict(row), "fact": fact})
-    return {**page_info(limit=size, offset=skip, count=len(rows), total=total), "requests": requests}
+        if fmt == "full" and chosen is None:
+            requests.append({**_request_dict(row), "fact": fact})
+        else:
+            requests.append({**_request_dict(row), **{name: fact[name] for name in REQUEST_FACT_FIELDS}})
+    shaped = shape_rows(requests, key="requests", fmt=fmt, fields=chosen, compact_default=COMPACT_REQUEST_FIELDS)
+    return {**page_info(limit=size, offset=skip, count=len(rows), total=total), **shaped}
 
 
 DUE_ORDERS = ("oldest_reviewed", "lowest_confidence", "newest")
@@ -220,11 +253,17 @@ def due_for_review(
     order: str = "oldest_reviewed",
     reviewed: bool | None = None,
     include_never_reviewed: bool = True,
+    created_since: str | None = None,
+    updated_since: str | None = None,
+    fields: list[str] | None = None,
+    format: str = "full",  # noqa: A002
 ) -> dict[str, Any]:
     """The actor's own facts last reviewed (or, never reviewed, created) before ``before``.
 
-    ``action``, ``subject`` (aliases resolved), ``object_kind`` and ``created_before`` narrow the list. ``order`` is
-    ``oldest_reviewed`` (default), ``lowest_confidence`` (then oldest) or ``newest`` (by creation).
+    ``action``, ``subject`` (aliases resolved), ``object_kind``, ``created_since``/``created_before`` and
+    ``updated_since`` (edited at or after a time) narrow the list. ``order`` is
+    ``oldest_reviewed`` (default), ``lowest_confidence`` (then oldest) or ``newest`` (by creation). ``fields`` and
+    ``format='compact'`` shape the rows as they do for ``search_facts``.
 
     Review state, with the same meaning as in ``search_facts``: ``reviewed`` True keeps only facts that have been
     reviewed, False only those never reviewed. ``include_never_reviewed`` says whether a never-reviewed fact counts,
@@ -260,9 +299,12 @@ def due_for_review(
     if object_kind is not None:
         where.append("object_kind = ?")
         params.append(check_kind("object_kind", object_kind, cfg))
-    if created_before is not None:
-        where.append("created_at < ?")
-        params.append(iso(parse_instant(created_before)))
+    time_where, time_params = time_clauses(
+        created_since=created_since, created_before=created_before, updated_since=updated_since
+    )
+    where.extend(time_where)
+    params.extend(time_params)
+    fmt, chosen = check_format(format), check_fields(fields, FACT_FIELDS)
     ordering = {
         "oldest_reviewed": "COALESCE(reviewed_at, created_at), rowid",
         "lowest_confidence": "confidence, COALESCE(reviewed_at, created_at), rowid",
@@ -279,7 +321,13 @@ def due_for_review(
         "before": cutoff,
         "order": order,
         **page_info(limit=size, offset=skip, count=len(rows), total=total),
-        "facts": [fact_dict(row) for row in rows],
+        **shape_rows(
+            [fact_dict(row) for row in rows],
+            key="facts",
+            fmt=fmt,
+            fields=chosen,
+            compact_default=COMPACT_FACT_FIELDS,
+        ),
     }
 
 
@@ -310,8 +358,13 @@ def review_outcomes(
     limit: int | None = None,
     offset: int = 0,
     role: str = "owner",
+    fields: list[str] | None = None,
+    format: str = "full",  # noqa: A002
 ) -> dict[str, Any]:
     """Recent review entries, newest first, optionally only those at or after ``since``.
+
+    ``fields`` and ``format='compact'`` shape the rows as they do for ``search_facts``; the compact columns leave out
+    the review id and the note unless they are named.
 
     ``role`` chooses whose entries: ``owner`` (default) is what anyone has said about the actor's own facts,
     ``reviewer`` is the reviews the actor wrote themselves (on any fact, confirmed ones included), ``all`` is both.
@@ -322,6 +375,7 @@ def review_outcomes(
     """
     if role not in OUTCOME_ROLES:
         raise ValidationError(f"role must be one of {', '.join(OUTCOME_ROLES)}.")
+    fmt, chosen = check_format(format), check_fields(fields, OUTCOME_FIELDS)
     scope = {
         "owner": "f.created_by = ?",
         "reviewer": "r.reviewer = ?",
@@ -364,7 +418,8 @@ def review_outcomes(
                 "object_ref": str(Ref(row["object_kind"], row["object"])),
             }
         outcomes.append(entry)
-    return {**page_info(limit=size, offset=skip, count=len(outcomes), total=total), "outcomes": outcomes}
+    shaped = shape_rows(outcomes, key="outcomes", fmt=fmt, fields=chosen, compact_default=COMPACT_OUTCOME_FIELDS)
+    return {**page_info(limit=size, offset=skip, count=len(outcomes), total=total), **shaped}
 
 
 def require_owner(row: sqlite3.Row, actor: str) -> None:
