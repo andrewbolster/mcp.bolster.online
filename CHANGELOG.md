@@ -1,5 +1,9 @@
 # Changelog
 
+## \[0.4.0\] - 2026-11-24
+
+- feat(facts): compact and projected results, time and date filters, grouping and a dependents query (#88)
+
 ## \[0.3.3\] - 2026-11-23
 
 - fix(facts): describe_entity resolution and exists, reviewed filter on due_for_review, punctuation-insensitive names (schema v4) (#86)
